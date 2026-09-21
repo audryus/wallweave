@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "audryus.wallweave",
+  "name": "Wall Weave",
+  "version": "1.0.0",
+  "author": "audryus",
+  "description": "A simple overlay for creating weaves",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "ui/shell.qml"
+  },
+  "barWidget": {
+    "displayName": "Wall Weave",
+    "description": "A simple overlay for creating weaves",
+    "category": "Tools",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
