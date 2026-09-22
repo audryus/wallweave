@@ -26,7 +26,7 @@ func main() {
 		}
 
 		if fn, ok := command.Get(req.Cmd); ok {
-			resp := fn(req, writer)
+			resp := fn(req)
 			writeResponse(writer, resp)
 			continue
 		}

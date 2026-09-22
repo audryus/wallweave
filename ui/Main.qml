@@ -165,6 +165,13 @@ Column {
             bar: root.bar
             active: menu.selected === 0
           }
+
+          Display {
+            id: displayCol
+            backend: backend
+            bar: root.bar
+            active: menu.selected === 1
+          }
         }
     }
 

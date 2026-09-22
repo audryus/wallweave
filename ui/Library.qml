@@ -3,12 +3,17 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-    // Bibliotecas — botão adicionar pasta + cards com carrossel e remover
-    // Reusa o MESMO backend de Main.qml — não cria Process próprio
+// Bibliotecas — botão adicionar pasta + cards com carrossel e remover
+// Reusa o MESMO backend de Main.qml — não cria Process próprio
 Column {
     id: root
-    width: parent.width
+    width: parent.width - Style.space(20)
     spacing: Style.space(10)
+    visible: active
+    opacity: active ? 1 : 0
+    // chama assim que backend for injetado e no onCompleted (cobre ambas ordens)
+    onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "libraries"}))
+    Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "libraries"}))
 
     // ----- props injetadas pelo pai -----
     property var backend: null
@@ -17,21 +22,17 @@ Column {
     readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
     // visibilidade controlada pelo Menu de Main, não aqui dentro
     property bool active: true
-    visible: active
-    opacity: active ? 1 : 0
 
     // ----- estado local -----
     property var libraries: []
 
     function removeLibrary(id) {
         // otimista local + avisa backend
-        libraries = libraries.filter(l => String(l.id) !== String(id))
+        libraries = libraries.filter(l => String(l.path) !== String(id))
         if (backend) backend.send({cmd: "library_remove", path: String(id)})
     }
 
-    // chama assim que backend for injetado e no onCompleted (cobre ambas ordens)
-    onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "libraries"}))
-    Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "libraries"}))
+    
 
     Process { id: folderPickerProc; command: ["zenity", "--file-selection", "--directory", "--title=Escolher pasta de wallpapers"]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: { var p = String(text||"").trim(); if (p.length>0 && backend) backend.send({cmd: "library", path: p}) } } }
 
@@ -46,10 +47,7 @@ Column {
         }
         function onLibraryReceived(data) {
             // resposta a library add/remove — atualiza lista
-            if (data && data.path) {
-                // recarrega lista completa
-                if (backend) backend.send({cmd: "libraries"})
-            }
+            if (backend) backend.send({cmd: "libraries"})
         }
         function onErrorReceived(msg) { console.warn("Library erro backend:", msg) }
     }
@@ -93,9 +91,9 @@ Column {
             width: libCol.width
             height: Style.space(150)
             radius: Style.cornerRadius
-            color: modelData.selected ? Style.selectedFillFor(root.foreground, Color.accent) : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b,0.04)
+            color: modelData.selected ? Style.selectedFillFor(root.bar?root.bar.foreground:Color.foreground, Color.accent) : Qt.rgba((root.bar?root.bar.foreground:Color.foreground).r,(root.bar?root.bar.foreground:Color.foreground).g,(root.bar?root.bar.foreground:Color.foreground).b,0.04)
             border.width: Style.spacing.hairline
-            border.color: modelData.selected ? Color.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b,0.12)
+            border.color: modelData.selected ? Color.accent : Qt.rgba((root.bar?root.bar.foreground:Color.foreground).r,(root.bar?root.bar.foreground:Color.foreground).g,(root.bar?root.bar.foreground:Color.foreground).b,0.12)
 
             Column {
                 anchors.fill: parent
@@ -118,16 +116,16 @@ Column {
                     height: parent.height
 
                     Repeater {
-                    model: (modelData.previews && modelData.previews.length > 0) ? modelData.previews : [""]
+                    model: (modelData.thumbs && modelData.thumbs.length > 0) ? modelData.thumbs : [""]
                     Rectangle {
                         required property var modelData
                         required property int index
                         width: Style.space(80)
                         height: Style.space(60)
                         radius: Style.cornerRadius
-                        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b,0.06)
+                        color: Qt.rgba((root.bar?root.bar.foreground:Color.foreground).r,(root.bar?root.bar.foreground:Color.foreground).g,(root.bar?root.bar.foreground:Color.foreground).b,0.06)
                         border.width: Style.spacing.hairline
-                        border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b,0.08)
+                        border.color: Qt.rgba((root.bar?root.bar.foreground:Color.foreground).r,(root.bar?root.bar.foreground:Color.foreground).g,(root.bar?root.bar.foreground:Color.foreground).b,0.08)
                         clip: true
 
                         Image {
@@ -141,8 +139,8 @@ Column {
                         anchors.centerIn: parent
                         visible: !modelData || String(modelData).length === 0
                         text: "preview"
-                        color: Qt.darker(root.foreground,1.6)
-                        font.family: root.fontFamily
+                        color: Qt.darker(root.bar?root.bar.foreground:Color.foreground,1.6)
+                        font.family: root.bar?root.bar.fontFamily:Style.font.family
                         font.pixelSize: Style.font.caption
                         font.italic: true
                         }
@@ -155,9 +153,9 @@ Column {
                 width: parent.width
                 spacing: Style.space(6)
                 Text {
-                    text: modelData.name
-                    color: root.foreground
-                    font.family: root.fontFamily
+                    text: modelData.path
+                    color: root.bar?root.bar.foreground:Color.foreground
+                    font.family: root.bar?root.bar.fontFamily:Style.font.family
                     font.pixelSize: Style.font.bodySmall
                     font.bold: true
                     elide: Text.ElideRight
@@ -166,12 +164,12 @@ Column {
                 }
                 Button {
                     id: removeBtn
-                    text: "Remove"
+                    text: "Remover"
                     foreground: Color.urgent
                     fontSize: Style.font.caption
                     horizontalPadding: Style.space(8)
                     verticalPadding: Style.space(4)
-                    onClicked: root.removeLibrary(modelData.id)
+                    onClicked: root.removeLibrary(modelData.path)
                 }
                 }
 
@@ -179,24 +177,17 @@ Column {
                 width: parent.width
                 spacing: Style.space(8)
                 Text {
-                    text: modelData.wallpapers + " images"
-                    color: Qt.darker(root.foreground,1.4)
-                    font.family: root.fontFamily
+                    text: modelData.count.images + " images"
+                    color: Qt.darker(root.bar?root.bar.foreground:Color.foreground,1.4)
+                    font.family: root.bar?root.bar.fontFamily:Style.font.family
                     font.pixelSize: Style.font.caption
                 }
                 Text {
-                    visible: modelData.videos > 0
-                    text: "• " + modelData.videos + " videos"
-                    color: Qt.darker(root.foreground,1.4)
-                    font.family: root.fontFamily
+                    visible: modelData.count.videos > 0
+                    text: "• " + modelData.count.videos + " videos"
+                    color: Qt.darker(root.bar?root.bar.foreground:Color.foreground,1.4)
+                    font.family: root.bar?root.bar.fontFamily:Style.font.family
                     font.pixelSize: Style.font.caption
-                }
-                Item { width: parent.width - 140; height: 1 }
-                Rectangle {
-                    visible: modelData.selected
-                    width: Style.space(8); height: Style.space(8); radius: 4
-                    color: Color.accent
-                    anchors.verticalCenter: parent.verticalCenter
                 }
                 }
             }

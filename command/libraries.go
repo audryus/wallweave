@@ -2,20 +2,25 @@ package command
 
 import (
 	"encoding/json"
-	"os"
 )
 
 func NewHandleLibraries() {
-	commands["libraries"] = func(req Request, w *os.File) Response {
-		file := openFile(librariesFilePath())
-		defer file.Close()
+	commands["libraries"] = handleLibraries
+}
 
-		libraries := readFile[[]Library](file)
+func handleLibraries(req Request) Response {
+	libraries := getLibraries()
 
-		b, err := json.Marshal(libraries)
-		if err != nil {
-			return Response{Type: "error", Message: err.Error()}
-		}
-		return Response{Type: "libraries", Message: string(b)}
+	b, err := json.Marshal(libraries)
+	if err != nil {
+		return Response{Type: "error", Message: err.Error()}
 	}
+	return Response{Type: "libraries", Message: string(b)}
+}
+
+func getLibraries() []Library {
+	file := openFile(librariesFilePath())
+	defer file.Close()
+
+	return readFile[[]Library](file)
 }

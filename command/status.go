@@ -2,7 +2,6 @@ package command
 
 import (
 	"encoding/json"
-	"os"
 	"os/exec"
 )
 
@@ -17,7 +16,7 @@ func NewHandleStatus() {
 		Connected bool   `json:"connected"`
 	}
 
-	commands["status"] = func(req Request, w *os.File) Response {
+	commands["status"] = func(req Request) Response {
 
 		var status Status
 		status.Color = "#2ecc71"

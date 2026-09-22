@@ -27,6 +27,7 @@ QtObject {
                     case "status": backend.statusReceived(payload); break
                     case "libraries": backend.librariesReceived(payload); break
                     case "library": backend.libraryReceived(payload); break
+                    case "library_remove": break
                     case "error": backend.errorReceived(payload); break
                     default: console.warn("Backend tipo desconhecido:", msg.type, msg)
                 }

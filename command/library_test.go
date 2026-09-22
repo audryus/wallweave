@@ -11,12 +11,10 @@ func TestOpenFile(t *testing.T) {
 func TestHandleLibrary(t *testing.T) {
 	// usa diretório temporário válido — generateLibrary valida IsDir
 	dir := t.TempDir()
-	file := openFile("libraries.json")
-	defer file.Close()
 
 	response := handleLibrary(Request{
 		Path: dir,
-	}, file)
+	})
 	if response.Type != "library" {
 		t.Errorf("Expected library response, got %v (%v)", response.Type, response.Message)
 	}
@@ -35,5 +33,31 @@ func TestGenerateLibrary(t *testing.T) {
 	}
 	if lib.Count.Images != 0 || lib.Count.Videos != 0 {
 		t.Errorf("Expected 0/0 em dir vazio, got %v/%v", lib.Count.Images, lib.Count.Videos)
+	}
+}
+
+func TestHandleLibraryRemove(t *testing.T) {
+	res := handleLibrary(Request{
+		Path: "/mnt/dev/projs/paper-wall/tema",
+	})
+
+	if res.Type != "library" {
+		t.Errorf("Expected library response, got %v (%v)", res.Type, res.Message)
+	}
+
+	res = handleLibraries(Request{
+		Cmd: "libraries",
+	})
+
+	if res.Type != "libraries" {
+		t.Errorf("Expected libraries response, got %v (%v)", res.Type, res.Message)
+	}
+
+	res = handleLibraryRemove(Request{
+		Path: "/mnt/dev/projs/paper-wall/tema",
+	})
+
+	if res.Type != "library_remove" {
+		t.Errorf("Expected library_remove response, got %v (%v)", res.Type, res.Message)
 	}
 }

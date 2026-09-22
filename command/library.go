@@ -10,32 +10,6 @@ import (
 	"strings"
 )
 
-func readFile[V any](file *os.File) V {
-	var result V
-	// garante leitura do início — readFile pode ser chamado com offset no EOF
-	if _, err := file.Seek(0, 0); err != nil {
-		return result
-	}
-	// arquivo vazio (0 bytes) -> EOF, retorna zero value (slice nil -> append funciona)
-	if info, err := file.Stat(); err == nil && info.Size() == 0 {
-		return result
-	}
-	if err := json.NewDecoder(file).Decode(&result); err != nil {
-		// EOF ou JSON inválido em arquivo recém-criado -> trata como vazio
-		return result
-	}
-	return result
-}
-
-func openFile(name string) *os.File {
-	// O_RDWR precisa para ler e depois truncar/escrever; O_CREATE cria se não existir
-	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		panic(err)
-	}
-	return file
-}
-
 func librariesFilePath() string {
 	// segue bkp/Wallweave.qml: pluginDir + "/libraries.json"
 	// respeita XDG_CONFIG_HOME, fallback para ~/.config
@@ -60,7 +34,7 @@ func NewHandleLibrary() {
 	commands["library"] = handleLibrary
 }
 
-func handleLibrary(req Request, w *os.File) Response {
+func handleLibrary(req Request) Response {
 	if req.Path == "" {
 		return Response{Type: "error", Message: "Invalid library path"}
 	}
@@ -69,6 +43,12 @@ func handleLibrary(req Request, w *os.File) Response {
 	defer file.Close()
 
 	libraries := readFile[[]Library](file)
+	for i := range libraries {
+		lib := libraries[i]
+		if lib.Path == req.Path {
+			return Response{Type: "error", Message: "Folder already added"}
+		}
+	}
 
 	// valida, conta e gera thumbs — corrige generateVideoThumb/processo
 	library, err := generateLibrary(req.Path)
@@ -91,9 +71,8 @@ func handleLibrary(req Request, w *os.File) Response {
 	if _, err := file.Write(b); err != nil {
 		return Response{Type: "error", Message: err.Error()}
 	}
-	// w é o stdout do backend — não usado aqui; resposta vai pelo return
-	_ = w
-	return Response{Type: "library", Message: string(b)}
+
+	return Response{Type: "library"}
 }
 
 // generate: validate the path exists and is a directory, count images and videos, generate thumbs (if possible), return Library struct with thumbs and counts.
