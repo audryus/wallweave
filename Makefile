@@ -11,3 +11,9 @@ run: build
 # (Run and Debug → "Attach to wallweave backend" → processo "wallweave")
 debug: build-debug
 	QML_IMPORT_PATH=/usr/share/omarchy/shell qs -p ui/_preview.qml
+
+validate:
+	omarchy plugin validate .
+
+rescan:
+	omarchy-shell shell rescanPlugins

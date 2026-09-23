@@ -13,7 +13,7 @@ QtObject {
     // Processo é filho, exposto via property para controle externo se precisar
     property var proc: Process {
         id: proc
-        command: ["./bin/wallweave"]
+        command: ["go", "run", "."]
         running: true
         stdinEnabled: true
         stdout: SplitParser {
