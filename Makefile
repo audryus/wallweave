@@ -17,3 +17,6 @@ validate:
 
 rescan:
 	omarchy-shell shell rescanPlugins
+
+restart: 
+	omarchy restart shell

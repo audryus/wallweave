@@ -27,6 +27,9 @@ var videoExts = map[string]bool{
 }
 
 func (c *Commander) ensureWorker(d Display) {
+	if !isWorkerMaster {
+		return
+	}
 	workerMu.Lock()
 	defer workerMu.Unlock()
 	if running[d.Name] {
@@ -38,9 +41,18 @@ func (c *Commander) ensureWorker(d Display) {
 	go c.runWorker(d.Name, ch)
 }
 
-// StartWorkers sobe os workers dos displays com lib atribuída (theme != 0).
+// StartWorkers: só o processo master (flock) sobe workers; os demais fazem retry.
 // Chamado no boot da aplicação — sem esperar a UI.
 func (c *Commander) StartWorkers() {
+	if tryAcquireWorkerLock() {
+		c.listenWake()
+		c.ensureAllThemeWorkers()
+		return
+	}
+	go c.retryWorkerLock()
+}
+
+func (c *Commander) ensureAllThemeWorkers() {
 	displays, err := c.listDisplays()
 	if err != nil {
 		return
@@ -53,33 +65,57 @@ func (c *Commander) StartWorkers() {
 }
 
 // signalWorker acorda o worker (timer/theme editado na UI).
+// Cross-process: se não há canal local, envia wake para o master.
 func signalWorker(name string) {
-	workerMu.Lock()
-	ch := wakes[name]
-	workerMu.Unlock()
-	if ch == nil {
+	if signalWorkerLocal(name) {
 		return
 	}
-	select {
-	case ch <- struct{}{}:
-	default:
+	if !isWorkerMaster {
+		sendWake(name)
 	}
 }
 
 // signalAllWorkers acorda todos (ex.: library deletada).
 func signalAllWorkers() {
+	if signalAllWorkersLocal() {
+		return
+	}
+	if !isWorkerMaster {
+		sendWake("*")
+	}
+}
+
+func signalWorkerLocal(name string) bool {
+	workerMu.Lock()
+	ch := wakes[name]
+	workerMu.Unlock()
+	if ch == nil {
+		return false
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func signalAllWorkersLocal() bool {
 	workerMu.Lock()
 	chs := make([]chan struct{}, 0, len(wakes))
 	for _, ch := range wakes {
 		chs = append(chs, ch)
 	}
 	workerMu.Unlock()
+	if len(chs) == 0 {
+		return false
+	}
 	for _, ch := range chs {
 		select {
 		case ch <- struct{}{}:
 		default:
 		}
 	}
+	return true
 }
 
 func (c *Commander) runWorker(name string, wake <-chan struct{}) {
@@ -184,7 +220,7 @@ func (c *Commander) runWorker(name string, wake <-chan struct{}) {
 			applyErr = c.applyImage(d.Name, file, status)
 		}
 		if applyErr != nil {
-			fmt.Printf("[worker %s] %v\n", name, applyErr)
+			fmt.Fprintf(os.Stderr, "[worker %s] %v\n", name, applyErr)
 		}
 	}
 }
@@ -253,7 +289,7 @@ func (c *Commander) setWallpaper(monitor, abs string, status Status) error {
 	}
 
 	cmd := exec.Command("omarchy", "theme", "bg", "set", abs)
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("omarchy theme bg set falhou: %w", err)
@@ -265,7 +301,7 @@ func (c *Commander) setWallpaper(monitor, abs string, status Status) error {
 func tryHyprpaper(monitor, abs string) error {
 	// garante que o daemon está rodando (hyprpaper 0.8.4 só tem wallpaper, não listloaded/preload)
 	if err := exec.Command("pgrep", "-x", "hyprpaper").Run(); err != nil {
-		fmt.Println("[hyprpaper] daemon não está rodando, iniciando...")
+		fmt.Fprintln(os.Stderr, "[hyprpaper] daemon não está rodando, iniciando...")
 		cmd := exec.Command("hyprpaper")
 		cmd.Stdout = nil
 		cmd.Stderr = nil
@@ -277,9 +313,9 @@ func tryHyprpaper(monitor, abs string) error {
 
 	// API 0.8.4: hyprctl hyprpaper wallpaper "MON,PATH[,fit]"
 	spec := fmt.Sprintf("%s,%s", monitor, abs)
-	//fmt.Printf("[hyprpaper] wallpaper %s\n", spec)
+	//fmt.Fprintf(os.Stderr, "[hyprpaper] wallpaper %s\n", spec)
 	cmdWall := exec.Command("hyprctl", "hyprpaper", "wallpaper", spec)
-	cmdWall.Stdout = os.Stdout
+	cmdWall.Stdout = os.Stderr
 	cmdWall.Stderr = os.Stderr
 	if err := cmdWall.Run(); err != nil {
 		return fmt.Errorf("wallpaper falhou: %w", err)
@@ -289,7 +325,7 @@ func tryHyprpaper(monitor, abs string) error {
 
 func tryMpvpaper(monitor, abs string, isVideo bool) error {
 	if err := stopMpvpaperForMonitor(monitor); err != nil {
-		fmt.Printf("[mpvpaper] aviso ao parar anterior: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[mpvpaper] aviso ao parar anterior: %v\n", err)
 	}
 
 	// -p = auto-pause quando oculto, -f = fork (daemoniza)
@@ -303,7 +339,7 @@ func tryMpvpaper(monitor, abs string, isVideo bool) error {
 		mpvOpts = "no-audio loop hwdec=auto video-unscaled=no scale=ewa_lanczossharp"
 	}
 	args := []string{"-p", "-f", "-l", layer, "-o", mpvOpts, monitor, abs}
-	fmt.Printf("[mpvpaper] %s\n", strings.Join(append([]string{"mpvpaper"}, args...), " "))
+	fmt.Fprintf(os.Stderr, "[mpvpaper] %s\n", strings.Join(append([]string{"mpvpaper"}, args...), " "))
 	cmd := exec.Command("mpvpaper", args...)
 	// NÃO usar CombinedOutput: com -f + loop o filho herda os pipes e o
 	// Wait fica preso até o vídeo "acabar" (nunca) — worker não avança de arquivo.
@@ -321,7 +357,7 @@ func tryMpvpaper(monitor, abs string, isVideo bool) error {
 	if err := exec.Command("pgrep", "-f", monitorPattern(monitor)).Run(); err != nil {
 		return fmt.Errorf("mpvpaper não parece estar rodando em %s após start", monitor)
 	}
-	fmt.Printf("[mpvpaper] live wallpaper ativo em %s -> %s\n", monitor, filepath.Base(abs))
+	fmt.Fprintf(os.Stderr, "[mpvpaper] live wallpaper ativo em %s -> %s\n", monitor, filepath.Base(abs))
 	return nil
 }
 
@@ -336,7 +372,7 @@ func stopMpvpaperForMonitor(monitor string) error {
 	if len(pids) == 0 {
 		return nil
 	}
-	fmt.Printf("[mpvpaper] parando instância anterior para %s (pids: %s)\n", monitor, strings.Join(pids, ","))
+	fmt.Fprintf(os.Stderr, "[mpvpaper] parando instância anterior para %s (pids: %s)\n", monitor, strings.Join(pids, ","))
 	for _, pid := range pids {
 		_ = exec.Command("kill", pid).Run()
 	}
@@ -366,13 +402,13 @@ func (c *Commander) mapLibraries() (map[int]string, error) {
 // restoreOmarchyDefault volta ao wallpaper global do omarchy APENAS para este monitor.
 func (c *Commander) restoreOmarchyDefault(monitor string) error {
 	themeName := getCurrentThemeName()
-	fmt.Printf("[undo %s] tema atual: %s\n", monitor, themeName)
+	fmt.Fprintf(os.Stderr, "[undo %s] tema atual: %s\n", monitor, themeName)
 
 	defaultPath := findDefaultWallpaper(themeName)
 	if defaultPath == "" {
 		return fmt.Errorf("nenhum wallpaper padrão encontrado para tema %s", themeName)
 	}
-	fmt.Printf("[undo %s] wallpaper padrão: %s\n", monitor, defaultPath)
+	fmt.Fprintf(os.Stderr, "[undo %s] wallpaper padrão: %s\n", monitor, defaultPath)
 
 	status, err := c.loadStatus()
 	if err != nil {
@@ -386,12 +422,12 @@ func (c *Commander) restoreOmarchyDefault(monitor string) error {
 
 	// omarchy global (background compartilhado)
 	if _, err := exec.LookPath("omarchy"); err == nil {
-		fmt.Printf("[undo %s] omarchy theme bg set %s\n", monitor, filepath.Base(defaultPath))
+		fmt.Fprintf(os.Stderr, "[undo %s] omarchy theme bg set %s\n", monitor, filepath.Base(defaultPath))
 		cmd := exec.Command("omarchy", "theme", "bg", "set", defaultPath)
-		cmd.Stdout = os.Stdout
+		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			fmt.Printf("[warn] omarchy bg set falhou: %v, tentando symlink manual\n", err)
+			fmt.Fprintf(os.Stderr, "[warn] omarchy bg set falhou: %v, tentando symlink manual\n", err)
 		} else {
 			_ = exec.Command("omarchy-shell", "-q", "background", "set", defaultPath).Run()
 			time.Sleep(50 * time.Millisecond)
@@ -408,9 +444,9 @@ func (c *Commander) restoreOmarchyDefault(monitor string) error {
 	if err := os.Symlink(defaultPath, link); err != nil {
 		return fmt.Errorf("falha ao criar symlink %s -> %s: %w", link, defaultPath, err)
 	}
-	fmt.Printf("[undo %s] symlink %s -> %s\n", monitor, link, defaultPath)
+	fmt.Fprintf(os.Stderr, "[undo %s] symlink %s -> %s\n", monitor, link, defaultPath)
 	cmd := exec.Command("omarchy-shell", "-q", "background", "set", defaultPath)
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	_ = cmd.Run()
 	time.Sleep(50 * time.Millisecond)

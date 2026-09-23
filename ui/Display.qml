@@ -201,7 +201,7 @@ Column {
                             Row {
                                 width: parent.width
                                 spacing: Style.space(8)
-                                Text { id: t60b; text: "5s"; color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4); font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption }
+                                Text { id: t60b; text: "60s"; color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4); font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption }
                                 Item { width: parent.width - t60b.width - t300b.width - parent.spacing*2; height: 1 }
                                 Text { id: t300b; text: "300s"; color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4); font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption }
                             }
