@@ -4,11 +4,18 @@ build:
 build-debug:
 	go build -gcflags="all=-N -l" -o bin/wallweave .
 
+# Preview with English (default).
 run: build
 	QML_IMPORT_PATH=/usr/share/omarchy/shell qs -p ui/_preview.qml
 
-# App completa com símbolos no Go — anexe pelo VS Code
-# (Run and Debug → "Attach to wallweave backend" → processo "wallweave")
+# Preview forcing Portuguese (works without generating pt_BR locale).
+run-pt: build
+	QML_IMPORT_PATH=/usr/share/omarchy/shell WALLWEAVE_LANG=pt qs -p ui/_preview.qml
+
+# Preview forcing Chinese.
+run-zh: build
+	QML_IMPORT_PATH=/usr/share/omarchy/shell WALLWEAVE_LANG=zh qs -p ui/_preview.qml
+
 debug: build-debug
 	QML_IMPORT_PATH=/usr/share/omarchy/shell qs -p ui/_preview.qml
 
