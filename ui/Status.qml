@@ -14,8 +14,8 @@ Item {
     property var widgetStatus: ({ color: '#ff0000', label: "Loading...", mpvpaper: false, hyprpaper: false, connected: false })
 
     // único ponto de envio: cobre injeção tardia (Main cria backend depois) e criação
-    onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "status"}))
-    Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "status"}))
+    //onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "status"}))
+    Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "get_status"}))
 
     // atualiza quando Backend emite statusReceived
     Connections {

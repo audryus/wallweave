@@ -171,6 +171,8 @@ Column {
             backend: backend
             bar: root.bar
             active: menu.selected === 1
+            libraries: libraryCol.libraries
+            status: statusItem.widgetStatus
           }
         }
     }

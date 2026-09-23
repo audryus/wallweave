@@ -8,7 +8,8 @@ QtObject {
     signal librariesReceived(var libraries)
     signal libraryReceived(var library)
     signal errorReceived(string message)
-
+    signal displaysReceived(var displays)
+    
     // Processo é filho, exposto via property para controle externo se precisar
     property var proc: Process {
         id: proc
@@ -17,20 +18,22 @@ QtObject {
         stdinEnabled: true
         stdout: SplitParser {
             onRead: data => {
-                const msg = JSON.parse(data)
-                let payload = msg
                 try {
-                    payload = JSON.parse(msg.message)
-                } catch (e) {}
+                    const msg = JSON.parse(data)
+                    
+                    const payload = JSON.parse(msg.message)
                 
-                switch (msg.type) {
-                    case "status": backend.statusReceived(payload); break
-                    case "libraries": backend.librariesReceived(payload); break
-                    case "library": backend.libraryReceived(payload); break
-                    case "library_remove": break
-                    case "error": backend.errorReceived(payload); break
-                    default: console.warn("Backend tipo desconhecido:", msg.type, msg)
-                }
+                    switch (msg.type) {
+                        case "get_status": backend.statusReceived(payload); break
+                        case "browse_libraries": backend.librariesReceived(payload); break
+                        case "add_library": backend.libraryReceived(payload); break
+                        case "del_library": break
+                        case "browse_displays": backend.displaysReceived(payload); break
+                        case "edit_display": break
+                        case "error": backend.errorReceived(payload); break
+                        default: console.warn("Backend tipo desconhecido:", msg.type, msg)
+                    }
+                } catch (e) {}
             }
         }
     }

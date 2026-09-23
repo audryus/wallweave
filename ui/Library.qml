@@ -12,8 +12,8 @@ Column {
     visible: active
     opacity: active ? 1 : 0
     // chama assim que backend for injetado e no onCompleted (cobre ambas ordens)
-    onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "libraries"}))
-    Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "libraries"}))
+    //onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "libraries"}))
+    Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "browse_libraries"}))
 
     // ----- props injetadas pelo pai -----
     property var backend: null
@@ -26,15 +26,18 @@ Column {
     // ----- estado local -----
     property var libraries: []
 
-    function removeLibrary(id) {
-        // otimista local + avisa backend
-        libraries = libraries.filter(l => String(l.path) !== String(id))
-        if (backend) backend.send({cmd: "library_remove", path: String(id)})
+    function removeLibrary(lib) {
+        // otimista local + avisa backend (prefere id, fallback path)
+        libraries = libraries.filter(l => l.id !== lib.id)
+        if (backend) {
+            if (lib.id)
+                backend.send({cmd: "del_library", id: lib.id})
+            else
+                backend.send({cmd: "del_library", path: String(lib.path)})
+        }
     }
 
-    
-
-    Process { id: folderPickerProc; command: ["zenity", "--file-selection", "--directory", "--title=Escolher pasta de wallpapers"]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: { var p = String(text||"").trim(); if (p.length>0 && backend) backend.send({cmd: "library", path: p}) } } }
+    Process { id: folderPickerProc; command: ["zenity", "--file-selection", "--directory", "--title=Escolher pasta de wallpapers"]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: { var p = String(text||"").trim(); if (p.length>0 && backend) backend.send({cmd: "add_library", path: p}) } } }
 
     // escuta SÓ o sinal tipado — não statusReceived
     Connections {
@@ -47,7 +50,7 @@ Column {
         }
         function onLibraryReceived(data) {
             // resposta a library add/remove — atualiza lista
-            if (backend) backend.send({cmd: "libraries"})
+            if (backend) backend.send({cmd: "browse_libraries"})
         }
         function onErrorReceived(msg) { console.warn("Library erro backend:", msg) }
     }
@@ -169,7 +172,7 @@ Column {
                     fontSize: Style.font.caption
                     horizontalPadding: Style.space(8)
                     verticalPadding: Style.space(4)
-                    onClicked: root.removeLibrary(modelData.path)
+                    onClicked: root.removeLibrary(modelData)
                 }
                 }
 

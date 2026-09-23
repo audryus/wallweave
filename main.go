@@ -8,10 +8,20 @@ import (
 	"os"
 
 	"github.com/audryus/wallweave/command"
+	"github.com/audryus/wallweave/db"
 )
 
 func main() {
-	command.RegisterCommands()
+	database, err := db.NewDatabase()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "db: %v\n", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	commander := command.NewCommander(database)
+	// workers sobem já no boot (dispensando a UI / o primeiro timer)
+	commander.StartWorkers()
 
 	reader := bufio.NewScanner(os.Stdin)
 	writer := os.Stdout
@@ -25,11 +35,7 @@ func main() {
 			continue
 		}
 
-		if fn, ok := command.Get(req.Cmd); ok {
-			resp := fn(req)
-			writeResponse(writer, resp)
-			continue
-		}
+		writeResponse(writer, commander.Exec(req))
 	}
 }
 

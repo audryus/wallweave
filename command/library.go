@@ -2,6 +2,7 @@ package command
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,69 +11,39 @@ import (
 	"strings"
 )
 
-func librariesFilePath() string {
-	// segue bkp/Wallweave.qml: pluginDir + "/libraries.json"
-	// respeita XDG_CONFIG_HOME, fallback para ~/.config
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "."
-		}
-		base = filepath.Join(home, ".config")
-	}
-	// plugin instalado via symlink ~/.config/omarchy/plugins/audryus.wallweave
-	pluginDir := filepath.Join(base, "omarchy", "plugins", "audryus.wallweave")
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		// fallback para cwd se não conseguir criar
-		return "libraries.json"
-	}
-	return filepath.Join(pluginDir, "libraries.json")
+func (c *Commander) registerLibrary() {
+	c.Register("add_library", c.addLibrary)
+	c.Register("del_library", c.delLibrary)
+	c.Register("browse_libraries", c.browseLibraries)
 }
 
-func NewHandleLibrary() {
-	commands["library"] = handleLibrary
-}
-
-func handleLibrary(req Request) Response {
+func (c *Commander) addLibrary(req Request) Response {
 	if req.Path == "" {
 		return Response{Type: "error", Message: "Invalid library path"}
 	}
 
-	file := openFile(librariesFilePath())
-	defer file.Close()
-
-	libraries := readFile[[]Library](file)
-	for i := range libraries {
-		lib := libraries[i]
-		if lib.Path == req.Path {
-			return Response{Type: "error", Message: "Folder already added"}
-		}
+	exists, err := c.libraryExists(req.Path)
+	if err != nil {
+		return Response{Type: "error", Message: err.Error()}
+	}
+	if exists {
+		return Response{Type: "error", Message: "Folder already added"}
 	}
 
-	// valida, conta e gera thumbs — corrige generateVideoThumb/processo
 	library, err := generateLibrary(req.Path)
 	if err != nil {
 		return Response{Type: "error", Message: err.Error()}
 	}
-	libraries = append(libraries, library)
 
-	b, err := json.Marshal(libraries)
+	if err := c.insertLibrary(&library); err != nil {
+		return Response{Type: "error", Message: err.Error()}
+	}
+
+	b, err := json.Marshal(library)
 	if err != nil {
 		return Response{Type: "error", Message: err.Error()}
 	}
-	// grava de volta no arquivo (não em w que no teste é read-only)
-	if err := file.Truncate(0); err != nil {
-		return Response{Type: "error", Message: err.Error()}
-	}
-	if _, err := file.Seek(0, 0); err != nil {
-		return Response{Type: "error", Message: err.Error()}
-	}
-	if _, err := file.Write(b); err != nil {
-		return Response{Type: "error", Message: err.Error()}
-	}
-
-	return Response{Type: "library"}
+	return Response{Type: "add_library", Message: string(b)}
 }
 
 // generate: validate the path exists and is a directory, count images and videos, generate thumbs (if possible), return Library struct with thumbs and counts.
@@ -173,4 +144,104 @@ func generateThumb(filePath string, thumbsDir string) error {
 		return fmt.Errorf("ffmpeg thumb %s: %w: %s", filepath.Base(filePath), err, stderr.String())
 	}
 	return nil
+}
+
+func (c *Commander) delLibrary(req Request) Response {
+	if req.ID == 0 && req.Path == "" {
+		return Response{Type: "error", Message: "Invalid library id/path"}
+	}
+
+	var err error
+	if req.ID != 0 {
+		err = c.deleteLibraryByID(req.ID)
+	} else {
+		err = c.deleteLibrary(req.Path)
+	}
+	if err != nil {
+		return Response{Type: "error", Message: err.Error()}
+	}
+
+	// acorda workers — display que apontava pra essa lib cai no caminho defensivo
+	signalAllWorkers()
+
+	return Response{Type: "del_library"}
+}
+
+func (c *Commander) browseLibraries(req Request) Response {
+	libraries, err := c.fetchLibraries()
+	if err != nil {
+		return Response{Type: "error", Message: err.Error()}
+	}
+
+	b, err := json.Marshal(libraries)
+	if err != nil {
+		return Response{Type: "error", Message: err.Error()}
+	}
+	return Response{Type: "browse_libraries", Message: string(b)}
+}
+
+func (c *Commander) fetchLibraries() ([]Library, error) {
+	libraries := make([]Library, 0)
+
+	rows, err := c.database.DB.Query(`SELECT id, path, thumbs, images, videos FROM libraries ORDER BY id`)
+	if err != nil {
+		return libraries, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var lib Library
+		var thumbs string
+		if err := rows.Scan(&lib.ID, &lib.Path, &thumbs, &lib.Count.Images, &lib.Count.Videos); err != nil {
+			return nil, err
+		}
+		if thumbs != "" {
+			if err := json.Unmarshal([]byte(thumbs), &lib.Thumbs); err != nil {
+				return nil, err
+			}
+		}
+		libraries = append(libraries, lib)
+	}
+	return libraries, rows.Err()
+}
+
+func (c *Commander) libraryExists(path string) (bool, error) {
+	var one int
+	err := c.database.DB.QueryRow(`SELECT 1 FROM libraries WHERE path = ?`, path).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (c *Commander) insertLibrary(lib *Library) error {
+	thumbs, err := json.Marshal(lib.Thumbs)
+	if err != nil {
+		return err
+	}
+	res, err := c.database.DB.Exec(
+		`INSERT INTO libraries (path, thumbs, images, videos) VALUES (?, ?, ?, ?)`,
+		lib.Path, string(thumbs), lib.Count.Images, lib.Count.Videos,
+	)
+	if err != nil {
+		return err
+	}
+	// AUTOINCREMENT começa em 1
+	if id, err := res.LastInsertId(); err == nil {
+		lib.ID = int(id)
+	}
+	return nil
+}
+
+func (c *Commander) deleteLibrary(path string) error {
+	_, err := c.database.DB.Exec(`DELETE FROM libraries WHERE path = ?`, path)
+	return err
+}
+
+func (c *Commander) deleteLibraryByID(id int) error {
+	_, err := c.database.DB.Exec(`DELETE FROM libraries WHERE id = ?`, id)
+	return err
 }
