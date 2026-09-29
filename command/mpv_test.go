@@ -42,7 +42,8 @@ func fakeMpv(t *testing.T, reply string) (string, <-chan map[string]any) {
 }
 
 // TestMpvLoadfile checks that loadfile sends the named-argument command
-// with the fit option, and skips mpv's event lines to read the reply.
+// with the fit option (skipping mpv's event lines to read the reply), then
+// unpauses mpv to clear a stuck auto-pause.
 func TestMpvLoadfile(t *testing.T) {
 	sock, got := fakeMpv(t, `{"data":{"playlist_entry_id":2},"request_id":1,"error":"success"}`)
 
@@ -53,6 +54,10 @@ func TestMpvLoadfile(t *testing.T) {
 	cmd, _ := req["command"].(map[string]any)
 	if cmd["name"] != "loadfile" || cmd["url"] != "/walls/clip.MP4" || cmd["flags"] != "replace" || cmd["options"] != "panscan=0" {
 		t.Errorf("unexpected command: %v", req)
+	}
+	unpause, _ := (<-got)["command"].([]any)
+	if len(unpause) != 3 || unpause[0] != "set_property" || unpause[1] != "pause" || unpause[2] != false {
+		t.Errorf("expected unpause after loadfile, got %v", unpause)
 	}
 }
 

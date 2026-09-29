@@ -62,16 +62,32 @@ func mpvShow(monitor, abs string) error {
 	return startMpvpaper(monitor, abs, sock)
 }
 
-// mpvLoadfile replaces the file shown by a running mpvpaper. The fit option
-// is passed per file, so it resets when the next file loads.
+// mpvLoadfile replaces the file shown by a running mpvpaper. Steps:
+//  1. Load the file. The fit option is passed per file, so it resets when
+//     the next file loads.
+//  2. Unpause mpv. mpvpaper's auto-pause (-p) toggles pause every ~2s on a
+//     static image, and a race in it can mistake its own pause for a user
+//     pause and keep mpv paused forever — the next video would then freeze
+//     on its first frame. An explicit unpause clears that stuck state; if
+//     the wallpaper is really hidden, auto-pause pauses it again within 2s.
 func mpvLoadfile(sock, abs string) error {
+	// Step 1: load the file.
 	_, err := mpvCommand(sock, map[string]string{
 		"name":    "loadfile",
 		"url":     abs,
 		"flags":   "replace",
 		"options": fitOption(abs),
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// Step 2: clear any stuck pause. The file is already loaded, so a
+	// failure here is only logged — returning it would make mpvShow restart
+	// mpvpaper (a layer remap) for nothing.
+	if _, err := mpvCommand(sock, []any{"set_property", "pause", false}); err != nil {
+		fmt.Fprintf(os.Stderr, "[mpvpaper] unpause failed: %v\n", err)
+	}
+	return nil
 }
 
 // startMpvpaper starts mpvpaper on a monitor with its IPC socket. Steps:
