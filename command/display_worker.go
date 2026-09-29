@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -257,7 +258,7 @@ func (c *Commander) runWorker(name string, wake <-chan struct{}) {
 			lastAppliedTheme = d.Theme
 		}
 
-		// Load the status (mpvpaper/hyprpaper availability). If it is not
+		// Load the status (mpvpaper availability). If it is not
 		// in the database yet, probe the system and save it.
 		status, err := c.loadStatus()
 		if err != nil {
@@ -292,14 +293,18 @@ func (c *Commander) runWorker(name string, wake <-chan struct{}) {
 		file := files[currentFile%len(files)]
 		currentFile++
 
-		// Apply the wallpaper: videos go to mpvpaper, images to hyprpaper
-		// (or the omarchy fallback).
+		// Apply the wallpaper: images and videos both go to this monitor's
+		// long-lived mpvpaper (see mpv.go). Without mpvpaper, images use
+		// Omarchy's global background and videos cannot play.
 		ext := strings.ToLower(filepath.Ext(file))
 		var applyErr error
-		if videoExts[ext] {
-			applyErr = tryMpvpaper(d.Name, file, true)
-		} else {
-			applyErr = c.applyImage(d.Name, file, status)
+		switch {
+		case status.Mpvpaper:
+			applyErr = mpvShow(d.Name, file)
+		case videoExts[ext]:
+			applyErr = fmt.Errorf("mpvpaper is not installed, cannot play %s", filepath.Base(file))
+		default:
+			applyErr = setOmarchyBackground(file)
 		}
 		if applyErr != nil {
 			// Log the failure but keep the worker running.
@@ -328,12 +333,14 @@ func listWallpaperFiles(display Display, root string) []string {
 	// Step 2: walk the folder, skipping thumbs/.
 	thumbsDir := filepath.Join(root, "thumbs")
 	var files []string
-	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+	// WalkDir reads only directory entries (no stat per file), which is
+	// several times faster than Walk on big libraries.
+	_ = filepath.WalkDir(root, func(p string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			// Ignore unreadable entries and keep walking.
 			return nil
 		}
-		if info.IsDir() {
+		if entry.IsDir() {
 			// Skip the thumbs directory entirely.
 			if p == thumbsDir {
 				return filepath.SkipDir
@@ -367,40 +374,11 @@ func listWallpaperFiles(display Display, root string) []string {
 	return files
 }
 
-// applyImage sets an image wallpaper on a monitor. Steps:
-//  1. Set the NEW image underneath the video first — when the video is
-//     killed, the new image is already there (otherwise the previous
-//     wallpaper flashes).
-//  2. Wait one short frame so the compositor can compose the new image.
-//  3. Stop mpvpaper for this monitor, revealing the new image.
-func (c *Commander) applyImage(monitor, abs string, status Status) error {
-	// Step 1: set the new image under the video first — killing the video
-	// reveals the new image (otherwise the previous one flashes).
-	setErr := c.setWallpaper(monitor, abs, status)
-	// Step 2: give the compositor one frame to compose the new image before
-	// taking the video down.
-	if setErr == nil {
-		time.Sleep(50 * time.Millisecond)
-	}
-	// Step 3: stop the video for this monitor.
-	_ = stopMpvpaperForMonitor(monitor)
-	return setErr
-}
-
-// setWallpaper applies an image wallpaper on a monitor. Steps:
-//  1. If hyprpaper is installed, try it first (per-monitor wallpaper).
-//  2. If hyprpaper is missing or failed, fall back to the omarchy command
-//     (sets the global background shared by all monitors).
-func (c *Commander) setWallpaper(monitor, abs string, status Status) error {
-	// Step 1: try hyprpaper when it is available.
-	if status.Hyprpaper {
-		if err := tryHyprpaper(monitor, abs); err == nil {
-			return nil
-		}
-		// hyprpaper failed → fall through to the omarchy fallback.
-	}
-
-	// Step 2: omarchy global fallback (shared background).
+// setOmarchyBackground sets Omarchy's global background (shared by all
+// monitors). It is the image fallback when mpvpaper is not installed:
+// omarchy-shell swaps the image on its existing layer surface, so no
+// pointer events are sent.
+func setOmarchyBackground(abs string) error {
 	cmd := exec.Command("omarchy", "theme", "bg", "set", abs)
 	// Send the command's own output to our stderr for debugging.
 	cmd.Stdout = os.Stderr
@@ -410,137 +388,6 @@ func (c *Commander) setWallpaper(monitor, abs string, status Status) error {
 	}
 	// Also notify omarchy-shell so its UI picks up the new background.
 	_ = exec.Command("omarchy-shell", "-q", "background", "set", abs).Run()
-	return nil
-}
-
-// tryHyprpaper sets the wallpaper for one monitor using hyprpaper.
-// Steps:
-//  1. Make sure the hyprpaper daemon is running (start it and wait a
-//     moment if it is not).
-//  2. Call "hyprctl hyprpaper wallpaper MON,PATH" to set the wallpaper
-//     (hyprpaper 0.8.4 API).
-func tryHyprpaper(monitor, abs string) error {
-	// Step 1: ensure the daemon is running (hyprpaper 0.8.4 only has
-	// "wallpaper", not listloaded/preload).
-	if err := exec.Command("pgrep", "-x", "hyprpaper").Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "[hyprpaper] daemon is not running, starting...")
-		cmd := exec.Command("hyprpaper")
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("failed to start hyprpaper: %w", err)
-		}
-		// Wait briefly for the daemon to come up.
-		_ = exec.Command("sleep", "0.8").Run()
-	}
-
-	// Step 2: hyprpaper 0.8.4 API: hyprctl hyprpaper wallpaper
-	// "MONITOR,PATH[,fit]".
-	spec := fmt.Sprintf("%s,%s", monitor, abs)
-	cmdWall := exec.Command("hyprctl", "hyprpaper", "wallpaper", spec)
-	cmdWall.Stdout = os.Stderr
-	cmdWall.Stderr = os.Stderr
-	if err := cmdWall.Run(); err != nil {
-		return fmt.Errorf("wallpaper failed: %w", err)
-	}
-	return nil
-}
-
-// tryMpvpaper starts a video wallpaper on a monitor using mpvpaper.
-// Steps:
-//  1. Stop any previous mpvpaper instance for this monitor.
-//  2. Build the mpvpaper arguments (layer, mpv options, monitor, file).
-//  3. Start mpvpaper detached (do NOT wait on its pipes — with "-f" and
-//     loop the child inherits them and Wait would block forever).
-//  4. Reap the child in a background goroutine (so it does not become a
-//     zombie) without blocking this worker.
-//  5. Wait briefly for the layer to appear, then confirm mpvpaper is
-//     running on the target monitor (no generic fallback — it could match
-//     another monitor).
-func tryMpvpaper(monitor, abs string, isVideo bool) error {
-	// Step 1: stop the previous instance for this monitor.
-	if err := stopMpvpaperForMonitor(monitor); err != nil {
-		fmt.Fprintf(os.Stderr, "[mpvpaper] warning while stopping previous: %v\n", err)
-	}
-
-	// Step 2: choose the layer and the mpv options.
-	// -p = auto-pause when hidden, -f = fork (daemonize).
-	// -l bottom keeps it above hyprpaper (background) when both run.
-	layer := "bottom"
-	if !isVideo {
-		layer = "background"
-	}
-	// Base options: no sound, loop forever, hardware decoding.
-	mpvOpts := "no-audio loop hwdec=auto"
-	if isVideo {
-		// For videos also scale nicely to the screen.
-		mpvOpts = "no-audio loop hwdec=auto video-unscaled=no scale=ewa_lanczossharp"
-	}
-	// Assemble the full argument list: flags, layer, options, monitor, file.
-	args := []string{"-p", "-f", "-l", layer, "-o", mpvOpts, monitor, abs}
-	fmt.Fprintf(os.Stderr, "[mpvpaper] %s\n", strings.Join(append([]string{"mpvpaper"}, args...), " "))
-	cmd := exec.Command("mpvpaper", args...)
-	// Step 3: do NOT use CombinedOutput: with -f + loop the child inherits
-	// the pipes and Wait stays blocked until the video "ends" (never) —
-	// the worker would never advance to the next file.
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("mpvpaper start: %w", err)
-	}
-	// Step 4: reap the zombie in the background without blocking the worker.
-	go func() { _ = cmd.Wait() }()
-
-	// Step 5: short wait only for the layer to rise — does not block the
-	// worker's rotation.
-	_ = exec.Command("sleep", "0.5").Run()
-
-	// Confirm only on the target monitor — no generic fallback (it could
-	// match another monitor).
-	if err := exec.Command("pgrep", "-f", monitorPattern(monitor)).Run(); err != nil {
-		return fmt.Errorf("mpvpaper does not seem to be running on %s after start", monitor)
-	}
-	fmt.Fprintf(os.Stderr, "[mpvpaper] live wallpaper active on %s -> %s\n", monitor, filepath.Base(abs))
-	return nil
-}
-
-// monitorPattern builds the pgrep pattern for one monitor. The monitor
-// name is matched as its own argument (surrounded by spaces) so "DP-1"
-// does not match "DP-10".
-func monitorPattern(monitor string) string {
-	return "mpvpaper.* " + monitor + " "
-}
-
-// stopMpvpaperForMonitor stops every mpvpaper instance running on a given
-// monitor. Steps:
-//  1. Find the pids with pgrep (using the monitor pattern).
-//  2. Return immediately when nothing is running.
-//  3. Kill each pid.
-//  4. Wait until they are gone (max ~300 ms) instead of a fixed sleep.
-func stopMpvpaperForMonitor(monitor string) error {
-	// Step 1: find the pids of mpvpaper processes for this monitor.
-	out, _ := exec.Command("pgrep", "-f", monitorPattern(monitor)).Output()
-	pids := strings.Fields(string(out))
-	// Step 2: nothing running for this monitor.
-	if len(pids) == 0 {
-		return nil
-	}
-	fmt.Fprintf(os.Stderr, "[mpvpaper] stopping previous instance for %s (pids: %s)\n", monitor, strings.Join(pids, ","))
-	// Step 3: kill every matching process.
-	for _, pid := range pids {
-		_ = exec.Command("kill", pid).Run()
-	}
-	// Step 4: wait until they disappear (max ~300ms) instead of a fixed
-	// 0.3s sleep.
-	deadline := time.Now().Add(300 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		// pgrep fails (exit code 1) when no process matches → all gone.
-		if err := exec.Command("pgrep", "-f", monitorPattern(monitor)).Run(); err != nil {
-			return nil
-		}
-		// Small pause before checking again.
-		time.Sleep(50 * time.Millisecond)
-	}
 	return nil
 }
 
@@ -564,12 +411,12 @@ func (c *Commander) mapLibraries() (map[int]string, error) {
 // only for this monitor. Steps:
 //  1. Find the current omarchy theme name.
 //  2. Find the default wallpaper image of that theme.
-//  3. Load the status (to know if hyprpaper is available).
-//  4. Set the default wallpaper BEFORE killing the video (avoids a flash of
-//     the previous wallpaper).
-//  5. Prefer the omarchy command; if it fails, create the symlink manually
-//     as a fallback.
-//  6. Stop mpvpaper for THIS monitor only (never touch the others).
+//  3. Set the default wallpaper BEFORE killing the video (avoids a flash of
+//     the previous wallpaper). Prefer the omarchy command; if it fails,
+//     create the symlink manually as a fallback.
+//  4. Stop mpvpaper for THIS monitor only (never touch the others). This
+//     remaps a layer once, but only on a user action — keeping mpvpaper up
+//     would hide later omarchy theme changes.
 func (c *Commander) restoreOmarchyDefault(monitor string) error {
 	// Step 1: get the current theme name.
 	themeName := getCurrentThemeName()
@@ -582,53 +429,26 @@ func (c *Commander) restoreOmarchyDefault(monitor string) error {
 	}
 	fmt.Fprintf(os.Stderr, "[undo %s] default wallpaper: %s\n", monitor, defaultPath)
 
-	// Step 3: load the tool availability status.
-	status, err := c.loadStatus()
-	if err != nil {
-		status = probeStatus()
-	}
-
-	// Step 4: set the default BEFORE killing the video — avoids a flash of
-	// the previous wallpaper.
-	if status.Hyprpaper {
-		_ = tryHyprpaper(monitor, defaultPath)
-	}
-
-	// Step 5: omarchy global (shared background).
-	if _, err := exec.LookPath("omarchy"); err == nil {
-		fmt.Fprintf(os.Stderr, "[undo %s] omarchy theme bg set %s\n", monitor, filepath.Base(defaultPath))
-		cmd := exec.Command("omarchy", "theme", "bg", "set", defaultPath)
-		cmd.Stdout = os.Stderr
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "[warn] omarchy bg set failed: %v, trying manual symlink\n", err)
-		} else {
-			// Omarchy succeeded: notify the shell and stop this monitor's
-			// video.
-			_ = exec.Command("omarchy-shell", "-q", "background", "set", defaultPath).Run()
-			time.Sleep(50 * time.Millisecond)
-			_ = stopMpvpaperForMonitor(monitor)
-			return nil
+	// Step 3: omarchy global (shared background).
+	if err := setOmarchyBackground(defaultPath); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] %v, trying manual symlink\n", err)
+		// Fallback: create the symlink manually.
+		home, _ := os.UserHomeDir()
+		link := filepath.Join(home, ".local/state/omarchy/current/background")
+		// Make sure the folder exists, remove any old link, create the new one.
+		_ = os.MkdirAll(filepath.Dir(link), 0o755)
+		_ = os.Remove(link)
+		if err := os.Symlink(defaultPath, link); err != nil {
+			return fmt.Errorf("failed to create symlink %s -> %s: %w", link, defaultPath, err)
 		}
+		fmt.Fprintf(os.Stderr, "[undo %s] symlink %s -> %s\n", monitor, link, defaultPath)
+		// Notify omarchy-shell about the new background.
+		_ = exec.Command("omarchy-shell", "-q", "background", "set", defaultPath).Run()
 	}
 
-	// Fallback: create the symlink manually.
-	home, _ := os.UserHomeDir()
-	link := filepath.Join(home, ".local/state/omarchy/current/background")
-	// Make sure the folder exists, remove any old link, create the new one.
-	_ = os.MkdirAll(filepath.Dir(link), 0o755)
-	_ = os.Remove(link)
-	if err := os.Symlink(defaultPath, link); err != nil {
-		return fmt.Errorf("failed to create symlink %s -> %s: %w", link, defaultPath, err)
-	}
-	fmt.Fprintf(os.Stderr, "[undo %s] symlink %s -> %s\n", monitor, link, defaultPath)
-	// Notify omarchy-shell about the new background.
-	cmd := exec.Command("omarchy-shell", "-q", "background", "set", defaultPath)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
+	// Step 4: give the compositor one frame, then stop this monitor's
+	// mpvpaper to reveal the default.
 	time.Sleep(50 * time.Millisecond)
-	// Only this monitor — never kill mpvpaper/hyprpaper of other monitors.
 	_ = stopMpvpaperForMonitor(monitor)
 	return nil
 }

@@ -17,8 +17,7 @@ You add folders full of images (and videos), pick one folder per display, set a 
 |---|---|---|
 | **Omarchy** | Host system (bar, shell, plugins) | Already on your machine if you are reading this on Omarchy |
 | **Go** | Builds the backend binary; also a runtime fallback (`go run .`) when `bin/wallweave` is missing | `mise install go` |
-| **hyprpaper** *(optional)* | Per-monitor image wallpapers | Install if you want different images per screen; otherwise Omarchy's global background is used |
-| **mpvpaper** *(optional)* | Video wallpapers | Install to enable the video toggle |
+| **mpvpaper** *(recommended)* | Shows image **and** video wallpapers, per monitor | Without it, images fall back to Omarchy's global background (same image on every screen) and videos are disabled |
 | **ffmpeg** | Generates thumbnail previews for libraries | Usually already present; needed only for previews |
 | **zenity** | "Add folder" file picker dialog | Needed only when adding a library from the UI |
 
@@ -81,8 +80,8 @@ After enabling, the widget appears in the chosen bar section. Click it to open t
    - **Change wallpaper** — set the rotation interval (60–300 seconds).
    - **Play videos** — allow video wallpapers on this screen (requires mpvpaper).
 4. Watch the status badge in the header:
-   - **Running** (green) — mpvpaper and hyprpaper are both installed.
-   - **Degraded** (yellow) — something is missing; hover for details.
+   - **Running** (green) — mpvpaper is installed.
+   - **Degraded** (yellow) — mpvpaper is missing; hover for details.
    - **Loading...** (red) — the backend has not answered yet.
 
 ## Architecture
@@ -110,17 +109,18 @@ Wall Weave is split into two processes that talk over **stdin/stdout, one JSON o
 │                                                                  │
 │  main.go               line loop: read Request → write Response  │
 │    └─ Commander         registry of commands                     │
-│         ├─ status.go    probe mpvpaper / hyprpaper               │
+│         ├─ status.go    probe mpvpaper                           │
 │         ├─ library.go   scan folders, ffmpeg thumbnails          │
 │         ├─ display.go   monitor list & settings                  │
 │         ├─ display_worker.go   one rotation loop per display     │
+│         ├─ mpv.go              long-lived mpvpaper + IPC swaps   │
 │         └─ worker_lock.go      multi-process master election     │
 │              │                                                   │
 │              ▼                                                   │
 │         SQLite (wallweave.db)  displays / libraries / status     │
 │              │                                                   │
 │              ▼                                                   │
-│         hyprpaper · mpvpaper · omarchy theme bg                  │
+│         mpvpaper (IPC socket) · omarchy theme bg                 │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -151,8 +151,11 @@ Known errors carry a stable `code` (e.g. `folder_exists`) that the UI translates
 
 - One **worker goroutine per display** that has a library selected (`theme != 0`).
 - Each worker loop: read settings → wait for timer **or** wake signal → pick the next file from a shuffled list (wraps forever) → apply it.
-- **Images:** hyprpaper first (per-monitor); if missing or it fails, fall back to `omarchy theme bg set` (global, same image on every screen).
-- **Videos:** mpvpaper, started detached with loop + no audio.
+- **Images and videos:** each monitor has **one long-lived mpvpaper** (loop, no audio, auto-pause when hidden). The worker swaps the file through mpv's IPC socket (`$XDG_RUNTIME_DIR/wallweave/mpv-<monitor>.sock`, `loadfile`) instead of restarting it. mpvpaper is only started at boot or after a crash.
+  - Why: starting/killing a wallpaper process (or changing a hyprpaper wallpaper) destroys and recreates a layer surface, and Hyprland then sends pointer events to the window under the cursor — a fullscreen video on *any* monitor would show its hidden cursor and player controls on every rotation. Swapping the file keeps the same surface.
+  - Images fill the screen (cropped edges); videos keep their whole frame.
+- **Without mpvpaper:** images fall back to `omarchy theme bg set` (global, same image on every screen); videos are skipped.
+- **Back to "Omarchy global":** sets the theme's default background and stops that monitor's mpvpaper.
 - **Changing library or deleting one** wakes the workers immediately so they do not wait for the timer.
 
 ### Multi-monitor = multiple processes
@@ -172,7 +175,7 @@ SQLite file `wallweave.db` (created next to the plugin root; ignored by git):
 |---|---|
 | `displays` | One row per monitor: name, library id (`theme`), timer, video flag, shuffle seed, resolution |
 | `libraries` | One row per wallpaper folder: path, thumbnail list (JSON), image/video counts |
-| `status` | Single row with the last health probe (mpvpaper/hyprpaper installed, label, color) |
+| `status` | Single row with the last health probe (mpvpaper installed, label, color) |
 
 The schema lives in `db/schema.sql` and is applied automatically on every start (`CREATE TABLE IF NOT EXISTS`).
 
@@ -192,7 +195,8 @@ wallweave/
 │   ├── status.go          get_status: probe tools, save/load health
 │   ├── library.go         add/del/browse libraries, ffmpeg thumbnails
 │   ├── display.go         browse/edit displays, hyprctl monitor detection
-│   ├── display_worker.go  Rotation loop, hyprpaper/mpvpaper/omarchy apply
+│   ├── display_worker.go  Rotation loop, omarchy default/fallback
+│   ├── mpv.go             Long-lived mpvpaper per monitor, IPC file swaps
 │   ├── worker_lock.go     flock master election + Unix-socket wake
 │   └── *_test.go          Unit tests
 └── ui/
@@ -260,17 +264,14 @@ go test ./...
 ## Optional tools cheat-sheet
 
 ```bash
-# Per-monitor static wallpapers (recommended for multi-monitor)
-omarchy pkg add hyprpaper
-
-# Video wallpapers
+# Per-monitor image and video wallpapers
 omarchy pkg add mpvpaper
 
 # Thumbnails + folder picker (if missing)
 omarchy pkg add ffmpeg zenity
 ```
 
-If hyprpaper or mpvpaper is missing, Wall Weave still works: images fall back to Omarchy's global background, and the video toggle is disabled with a warning in the UI.
+If mpvpaper is missing, Wall Weave still works: images fall back to Omarchy's global background (same image on every screen), and the video toggle is disabled with a warning in the UI.
 
 ## License
 

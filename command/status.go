@@ -7,13 +7,12 @@ import (
 )
 
 // Status holds the health information of the wallpaper tools:
-// whether mpvpaper and hyprpaper are installed, plus a color and stable
+// whether mpvpaper is installed, plus a color and stable
 // message codes the UI translates, and whether the backend is connected.
 // Label, Video, and Image are i18n keys (e.g. "running", "mpvpaper_missing",
 // "omarchy_fallback") — never English sentences.
 type Status struct {
 	Mpvpaper  bool   `json:"mpvpaper"`
-	Hyprpaper bool   `json:"hyprpaper"`
 	Video     string `json:"video"`
 	Image     string `json:"image"`
 	Color     string `json:"color"`
@@ -28,7 +27,7 @@ func (c *Commander) registerStatus() {
 }
 
 // getStatus is the handler for the "get_status" command. It:
-//  1. Probes the system (checks if mpvpaper and hyprpaper exist).
+//  1. Probes the system (checks if mpvpaper exists).
 //  2. Saves the result in the database (so it can be loaded later).
 //  3. Serializes the status to JSON and returns it to the frontend.
 func (c *Commander) getStatus(req Request) Response {
@@ -51,9 +50,10 @@ func (c *Commander) getStatus(req Request) Response {
 }
 
 // probeStatus checks the machine for the required tools:
-//   - If mpvpaper is missing, the status becomes "degraded" (yellow).
-//   - If hyprpaper is missing, the status becomes "degraded" too.
-//   - When both exist, the status is "running" (green).
+//   - If mpvpaper is missing, the status becomes "degraded" (yellow):
+//     videos cannot play and images fall back to Omarchy's global
+//     background (same image on every monitor).
+//   - Otherwise the status is "running" (green).
 //
 // Label/Video/Image hold stable codes the UI translates — never English
 // sentences. It never fails; it only returns what it found.
@@ -68,17 +68,9 @@ func probeStatus() Status {
 	if _, err := exec.LookPath("mpvpaper"); err == nil {
 		status.Mpvpaper = true
 	} else {
-		// mpvpaper is missing: mark as degraded and set the reason code.
+		// mpvpaper is missing: mark as degraded and set the reason codes.
 		status.Color = "#f1c40f"
 		status.Video = "mpvpaper_missing"
-		status.Label = "degraded"
-	}
-	// Check if the "hyprpaper" executable exists in PATH.
-	if _, err := exec.LookPath("hyprpaper"); err == nil {
-		status.Hyprpaper = true
-	} else {
-		// hyprpaper is missing: mark as degraded and set the fallback code.
-		status.Color = "#f1c40f"
 		status.Image = "omarchy_fallback"
 		status.Label = "degraded"
 	}
@@ -90,18 +82,17 @@ func probeStatus() Status {
 // insert if it does not exist, update all fields if it does.
 func (c *Commander) saveStatus(s Status) error {
 	_, err := c.database.DB.Exec(
-		`INSERT INTO status (id, mpvpaper, hyprpaper, video, image, color, label, connected, updated_at)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		`INSERT INTO status (id, mpvpaper, video, image, color, label, connected, updated_at)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET
 			mpvpaper = excluded.mpvpaper,
-			hyprpaper = excluded.hyprpaper,
 			video = excluded.video,
 			image = excluded.image,
 			color = excluded.color,
 			label = excluded.label,
 			connected = excluded.connected,
 			updated_at = excluded.updated_at`,
-		s.Mpvpaper, s.Hyprpaper, s.Video, s.Image, s.Color, s.Label, s.Connected,
+		s.Mpvpaper, s.Video, s.Image, s.Color, s.Label, s.Connected,
 	)
 	return err
 }
@@ -111,11 +102,11 @@ func (c *Commander) saveStatus(s Status) error {
 // Booleans are stored as 0/1 integers, so they are converted back here.
 func (c *Commander) loadStatus() (Status, error) {
 	var s Status
-	var mpvpaper, hyprpaper, connected int
+	var mpvpaper, connected int
 	// Query the single status row (id = 1).
 	err := c.database.DB.QueryRow(
-		`SELECT mpvpaper, hyprpaper, video, image, color, label, connected FROM status WHERE id = 1`,
-	).Scan(&mpvpaper, &hyprpaper, &s.Video, &s.Image, &s.Color, &s.Label, &connected)
+		`SELECT mpvpaper, video, image, color, label, connected FROM status WHERE id = 1`,
+	).Scan(&mpvpaper, &s.Video, &s.Image, &s.Color, &s.Label, &connected)
 	if err == sql.ErrNoRows {
 		// Nothing saved yet: return an empty status.
 		return Status{}, nil
@@ -125,7 +116,6 @@ func (c *Commander) loadStatus() (Status, error) {
 	}
 	// Convert the 0/1 integers back to booleans.
 	s.Mpvpaper = mpvpaper != 0
-	s.Hyprpaper = hyprpaper != 0
 	s.Connected = connected != 0
 	return s, nil
 }

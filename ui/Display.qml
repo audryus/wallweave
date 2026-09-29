@@ -2,7 +2,7 @@
 // "Displays" panel: one card per monitor. Each card lets the user pick
 // which library (wallpaper folder) that monitor rotates through, change
 // the rotation interval with a slider, and enable/disable video
-// wallpapers. It also shows warnings when hyprpaper or mpvpaper are not
+// wallpapers. It also shows warnings when mpvpaper is not
 // installed. All labels go through I18n.
 import QtQuick
 import Quickshell
@@ -39,7 +39,7 @@ Column {
     property var displays: []
     // Editable settings per monitor, keyed by monitor name.
     property var monitorState: ({})
-    // Health status (mpvpaper/hyprpaper installed?), passed from Main.
+    // Health status (mpvpaper installed?), passed from Main.
     property var status: null
 
     // getLibraries builds the dropdown options: always offer "Omarchy
@@ -218,13 +218,13 @@ Column {
                                 enabled: true
                                 onChanged: function(v) { root.updateMonitor(mon.name, { theme: Number(v) }) }
                             }
-                            // Warning when hyprpaper is not installed: every
+                            // Warning when mpvpaper is not installed: every
                             // monitor will share the same global image.
                             Text {
-                                visible: !root.status.hyprpaper
+                                visible: !root.status.mpvpaper
                                 width: parent.width
                                 wrapMode: Text.WordWrap
-                                text: I18n.tr("display.hyprpaper_missing")
+                                text: I18n.tr("display.omarchy_fallback")
                                 color: "#f1c40f"
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.caption

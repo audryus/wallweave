@@ -20,7 +20,7 @@ Item {
 
     // Initial state until the first response arrives from Go. label is
     // empty on purpose — the badge shows the translated "Loading..." then.
-    property var widgetStatus: ({ color: '#ff0000', label: "", mpvpaper: false, hyprpaper: false, connected: false })
+    property var widgetStatus: ({ color: '#ff0000', label: "", mpvpaper: false, connected: false })
 
     // Single place that sends the status request: covers late injection
     // (Main creates the backend after this component) and normal creation.

@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS libraries (
 CREATE TABLE IF NOT EXISTS status (
 	id         INTEGER PRIMARY KEY CHECK (id = 1),
 	mpvpaper   INTEGER NOT NULL DEFAULT 0,
-	hyprpaper  INTEGER NOT NULL DEFAULT 0,
 	video      TEXT    NOT NULL DEFAULT '',
 	image      TEXT    NOT NULL DEFAULT '',
 	color      TEXT    NOT NULL DEFAULT '#ff0000',

@@ -122,22 +122,11 @@ Column {
                 font.pixelSize: Style.font.caption
                 font.italic: true
             }
-            // Whether hyprpaper (per-monitor images) is installed.
+            // Extra hint when mpvpaper is missing: images fall back to
+            // Omarchy's global background. Go sends the "omarchy_fallback"
+            // code, which I18n turns into a sentence.
             Text {
-                text: I18n.tr("status.hyprpaper", [
-                    statusItem.widgetStatus.hyprpaper ? I18n.tr("status.installed") : I18n.tr("status.not_installed")
-                ])
-                color: statusItem.widgetStatus.hyprpaper ? "#2ecc71" : "#f1c40f"
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: !statusItem.widgetStatus.hyprpaper
-                width: parent.width
-                wrapMode: Text.WordWrap
-            }
-            // Extra hint when hyprpaper is missing: Go sends the
-            // "omarchy_fallback" code, which I18n turns into a sentence.
-            Text {
-                visible: !statusItem.widgetStatus.hyprpaper
+                visible: !statusItem.widgetStatus.mpvpaper
                 text: statusItem.widgetStatus.image
                     ? I18n.tr("status." + statusItem.widgetStatus.image)
                     : I18n.tr("status.omarchy_fallback")
@@ -146,11 +135,11 @@ Column {
                 font.pixelSize: Style.font.caption
                 font.italic: true
             }
-            // Happy path: both tools installed and running.
+            // Happy path: mpvpaper installed and running.
             Text {
                 // Go sends color "#2ecc71" + label "running" when all is well.
                 visible: statusItem.widgetStatus.color === "#2ecc71"
-                text: I18n.tr("status.both_ok")
+                text: I18n.tr("status.all_ok")
                 color: "#2ecc71"
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
