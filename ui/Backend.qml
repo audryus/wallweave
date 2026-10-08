@@ -18,6 +18,9 @@ QtObject {
     // when present; message is the technical text for the console.
     signal errorReceived(string message, string code)
     signal displaysReceived(var displays)      // display/monitor list
+    // The Go process (re)started — panels re-send their initial requests,
+    // since anything sent while it was down was dropped.
+    signal started()
 
     // Backend.qml lives in <pluginRoot>/ui/ — the plugin root is the
     // parent folder of this file. Resolving it relatively (instead of a
@@ -60,8 +63,21 @@ QtObject {
         stderr: SplitParser {
             onRead: data => console.warn("[wallweave]", data)
         }
-        // Log when the backend process exits unexpectedly.
-        onExited: (code, status) => console.warn("[wallweave] exited", code, status)
+        onRunningChanged: if (running) backend.started()
+        // Log when the backend process exits unexpectedly and restart it
+        // (e.g. "database is locked" while the other monitor's process
+        // was starting).
+        onExited: (code, status) => {
+            console.warn("[wallweave] exited", code, status)
+            restartTimer.start()
+        }
+    }
+
+    // Short delay before restarting so a crash loop does not spin.
+    property var restartTimer: Timer {
+        id: restartTimer
+        interval: 2000
+        onTriggered: proc.running = true
     }
 
     // handleLine parses one line of stdout and re-emits it as a typed

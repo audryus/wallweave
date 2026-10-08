@@ -3,6 +3,8 @@ package command
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
 )
 
@@ -28,7 +30,9 @@ func (c *Commander) registerStatus() {
 
 // getStatus is the handler for the "get_status" command. It:
 //  1. Probes the system (checks if mpvpaper exists).
-//  2. Saves the result in the database (so it can be loaded later).
+//  2. Saves the result in the database (so it can be loaded later). A
+//     failed save is only logged: the probe itself is still valid, and
+//     answering with an error would leave the UI badge stuck on red.
 //  3. Serializes the status to JSON and returns it to the frontend.
 func (c *Commander) getStatus(req Request) Response {
 	// Step 1: check which wallpaper tools are installed.
@@ -36,7 +40,7 @@ func (c *Commander) getStatus(req Request) Response {
 
 	// Step 2: persist the status in the database.
 	if err := c.saveStatus(status); err != nil {
-		return Response{Type: "error", Message: err.Error()}
+		fmt.Fprintf(os.Stderr, "[status] save: %v\n", err)
 	}
 
 	// Step 3: convert the status to JSON for the frontend.

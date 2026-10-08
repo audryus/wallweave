@@ -63,6 +63,8 @@ Column {
     // Listen to ONLY the typed signals for libraries — not statusReceived.
     Connections {
         target: backend
+        // Backend (re)started — ask again; earlier requests were dropped.
+        function onStarted() { backend.send({cmd: "browse_libraries"}) }
         // Full list arrived (after browse_libraries).
         function onLibrariesReceived(data) {
             // Go sends {type:"browse_libraries", message:"[...]"} — Backend
@@ -172,6 +174,9 @@ Column {
                         source: modelData && String(modelData).length > 0 ? "file://" + String(modelData) : ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
+                        // Decode at tile size, not at the file's resolution.
+                        sourceSize.width: width
+                        sourceSize.height: height
                         visible: String(modelData).length > 0
                         }
                         // Placeholder text when there is no thumbnail yet.

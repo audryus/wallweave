@@ -29,6 +29,8 @@ Item {
     // Update the badge whenever the backend emits statusReceived.
     Connections {
         target: backend
+        // Backend (re)started — ask again; earlier requests were dropped.
+        function onStarted() { backend.send({cmd: "get_status"}) }
         function onStatusReceived(s) {
             root.widgetStatus = s
             root.widgetStatus.connected = true

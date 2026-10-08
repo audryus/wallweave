@@ -105,6 +105,8 @@ Column {
     // Listen to ONLY the typed display signals — not statusReceived.
     Connections {
         target: backend
+        // Backend (re)started — ask again; earlier requests were dropped.
+        function onStarted() { backend.send({cmd: "browse_displays"}) }
         // The display list arrived after browse_displays.
         function onDisplaysReceived(data) {
             if (Array.isArray(data)) root.displays = data

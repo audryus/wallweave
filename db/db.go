@@ -7,6 +7,8 @@ import (
 	_ "embed"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -33,9 +35,14 @@ func NewDatabase() (Database, error) {
 // Steps:
 //  1. Create the parent folder if the path contains one.
 //  2. Open the SQLite file with the modernc driver.
-//  3. Enable WAL journal mode and a 5 second busy timeout, so concurrent
-//     reads do not fail with "database is locked".
-//  4. Run the embedded schema (create tables if they do not exist).
+//  3. Enable a 5 second busy timeout and WAL journal mode on EVERY pooled
+//     connection (via the DSN), so concurrent access — including a second
+//     wallweave process on another monitor — waits instead of failing with
+//     "database is locked".
+//  4. Run the embedded schema (create tables if they do not exist),
+//     retrying briefly while the file is locked: creating a fresh WAL
+//     database or recovering one after an unclean shutdown returns
+//     SQLITE_BUSY right away, without honoring busy_timeout.
 //  5. Return a Database that wraps the open connection.
 func Open(path string) (Database, error) {
 	// Step 1: make sure the parent directory exists.
@@ -47,22 +54,26 @@ func Open(path string) (Database, error) {
 
 	// Step 2: open the SQLite file (the driver was registered by the blank
 	// import of modernc.org/sqlite above).
-	handle, err := sql.Open("sqlite", path)
+	// Step 3: the pragmas go in the DSN because database/sql opens several
+	// connections and a PRAGMA run with Exec only reaches one of them.
+	// busy_timeout comes first so switching to WAL already waits on locks.
+	handle, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return Database{}, err
 	}
 
-	// Step 3: WAL + busy_timeout so concurrent reads do not hit
-	// "database is locked".
-	if _, err := handle.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`); err != nil {
-		handle.Close()
-		return Database{}, err
-	}
-
 	// Step 4: create the tables defined in schema.sql.
-	if err := migrate(handle); err != nil {
-		handle.Close()
-		return Database{}, err
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err = migrate(handle)
+		if err == nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "database is locked") || time.Now().After(deadline) {
+			handle.Close()
+			return Database{}, err
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Step 5: wrap the open handle and return it.
