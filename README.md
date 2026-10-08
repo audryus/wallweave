@@ -4,6 +4,9 @@
 
 You add folders full of images (and videos), pick one folder per display, set a timer, and Wall Weave keeps changing the wallpaper in the background. On multi-monitor setups each screen can run its own library, its own interval, and its own video setting.
 
+> [!IMPORTANT]
+> **Honest disclaimer:** A human with a soul and a caffeine addiction designed the structure, drove the logic, and made the calls. An AI (with a lot more free time) played a real role too: it helped design, wrote and refactored large parts of the code, translated comments, wrote the unit tests, and validated the whole thing — always with the human in the loop reviewing, correcting, and taking responsibility. So: **human-led, AI-assisted, human-approved.** If it starts speaking in binary, pull the plug.
+
 ## Screenshots
 
 ### Libraries
@@ -17,11 +20,6 @@ Add the folders that hold your wallpapers. Each library shows a thumbnail previe
 One card per monitor: pick which library it rotates through, set the change interval (60–300 seconds), and choose whether videos may play on that screen.
 
 ![Wall Weave — Displays tab](assets/displays.png)
-
----
-
-> [!IMPORTANT]
-> **Honest disclaimer:** A human with a soul and a caffeine addiction designed the structure, drove the logic, and made the calls. An AI (with a lot more free time) played a real role too: it helped design, wrote and refactored large parts of the code, translated comments, wrote the unit tests, and validated the whole thing — always with the human in the loop reviewing, correcting, and taking responsibility. So: **human-led, AI-assisted, human-approved.** If it starts speaking in binary, pull the plug.
 
 ---
 
