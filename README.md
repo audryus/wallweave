@@ -4,6 +4,20 @@
 
 You add folders full of images (and videos), pick one folder per display, set a timer, and Wall Weave keeps changing the wallpaper in the background. On multi-monitor setups each screen can run its own library, its own interval, and its own video setting.
 
+## Screenshots
+
+### Libraries
+
+Add the folders that hold your wallpapers. Each library shows a thumbnail preview strip, its path, and how many images and videos it contains.
+
+![Wall Weave — Libraries tab](assets/libraries.png)
+
+### Displays
+
+One card per monitor: pick which library it rotates through, set the change interval (60–300 seconds), and choose whether videos may play on that screen.
+
+![Wall Weave — Displays tab](assets/displays.png)
+
 ---
 
 > [!IMPORTANT]
@@ -187,6 +201,7 @@ wallweave/
 ├── main.go                Process entry: DB open, workers start, stdin/stdout loop
 ├── go.mod / go.sum        Go module (github.com/audryus/wallweave)
 ├── Makefile               build / preview / validate / rescan helpers
+├── assets/                README screenshots
 ├── db/
 │   ├── db.go              Open SQLite, WAL mode, run migration
 │   └── schema.sql         Table definitions
