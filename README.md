@@ -28,28 +28,16 @@ One card per monitor: pick which library it rotates through, set the change inte
 | Requirement | Why | How to install |
 |---|---|---|
 | **Omarchy** | Host system (bar, shell, plugins) | Already on your machine if you are reading this on Omarchy |
-| **Go** | Builds the backend binary; also a runtime fallback (`go run .`) when `bin/wallweave` is missing | `mise install go` |
+| **Python 3** | Runs the backend (standard library only, nothing to `pip install`) | Already on Omarchy (`python` is a dependency of `uwsm`) |
 | **mpvpaper** *(recommended)* | Shows image **and** video wallpapers, per monitor | Without it, images fall back to Omarchy's global background (same image on every screen) and videos are disabled |
 | **ffmpeg** | Generates thumbnail previews for libraries | Usually already present; needed only for previews |
 | **zenity** | "Add folder" file picker dialog | Needed only when adding a library from the UI |
 
-> **Note:** The UI prefers the prebuilt `bin/wallweave` (from `make build`). If that binary is missing, `Backend.qml` falls back to `go run .`, which needs `go` on your shell's `PATH` (with mise, that means Go stays activated in your config).
-
 ## Installation
 
-### 1. Install Go (once)
+There is no build step: the backend is plain Python that `Backend.qml` runs straight from the plugin folder.
 
-```bash
-mise install go
-```
-
-Make sure the installed version satisfies `go.mod` (this project targets Go **1.27.1**):
-
-```bash
-go version
-```
-
-### 2. Install the plugin
+### Install the plugin
 
 ```bash
 omarchy plugin add https://github.com/audryus/wallweave.git --enable
@@ -106,7 +94,7 @@ Wall Weave is split into two processes that talk over **stdin/stdout, one JSON o
 │                                                                  │
 │  ui/shell.qml          bar button + PopupCard host               │
 │    └─ ui/Main.qml      full popup layout                         │
-│         ├─ Backend.qml  spawns & talks to the Go process         │
+│         ├─ Backend.qml  spawns & talks to the Python process     │
 │         ├─ Status.qml   health badge (header)                    │
 │         ├─ Menu.qml     left nav (Libraries / Displays)          │
 │         ├─ Library.qml  add/remove wallpaper folders             │
@@ -117,16 +105,16 @@ Wall Weave is split into two processes that talk over **stdin/stdout, one JSON o
 └──────────────┼───────────────────────────────────────────────────┘
                │  stdin / stdout (JSON Lines)
 ┌──────────────┼───────────────────────────────────────────────────┐
-│  bin/wallweave (or go run .) ▼                                │
+│  python3 -u -m backend ▼                                         │
 │                                                                  │
-│  main.go               line loop: read Request → write Response  │
+│  __main__.py           line loop: read Request → write Response  │
 │    └─ Commander         registry of commands                     │
-│         ├─ status.go    probe mpvpaper                           │
-│         ├─ library.go   scan folders, ffmpeg thumbnails          │
-│         ├─ display.go   monitor list & settings                  │
-│         ├─ display_worker.go   one rotation loop per display     │
-│         ├─ mpv.go              long-lived mpvpaper + IPC swaps   │
-│         └─ worker_lock.go      multi-process master election     │
+│         ├─ status.py    probe mpvpaper                           │
+│         ├─ library.py   scan folders, ffmpeg thumbnails          │
+│         ├─ display.py   monitor list & settings                  │
+│         ├─ worker.py           one rotation loop per display     │
+│         ├─ mpv.py              long-lived mpvpaper + IPC swaps   │
+│         └─ worker_lock.py      multi-process master election     │
 │              │                                                   │
 │              ▼                                                   │
 │         SQLite (wallweave.db)  displays / libraries / status     │
@@ -139,8 +127,8 @@ Wall Weave is split into two processes that talk over **stdin/stdout, one JSON o
 ### How a command flows
 
 1. The user clicks something in QML (for example, picks a library for a monitor).
-2. `Backend.qml` writes one JSON line to the Go process: `{"cmd":"edit_display","display":{...}}`.
-3. `main.go` reads the line, unmarshals it into a `Request`, and `Commander.Exec` looks up the handler by name.
+2. `Backend.qml` writes one JSON line to the backend process: `{"cmd":"edit_display","display":{...}}`.
+3. `backend/__main__.py` reads the line, parses it into a `Request`, and `Commander.exec` looks up the handler by name.
 4. The handler updates SQLite, does its work, and returns a `Response`.
 5. `Backend.qml` parses the response line and emits a typed signal (`displaysReceived`, `statusReceived`, …).
 6. The matching QML component reacts and updates the UI.
@@ -161,7 +149,7 @@ Known errors carry a stable `code` (e.g. `folder_exists`) that the UI translates
 
 ### Wallpaper workers
 
-- One **worker goroutine per display** that has a library selected (`theme != 0`).
+- One **worker thread per display** that has a library selected (`theme != 0`).
 - Each worker loop: read settings → wait for timer **or** wake signal → pick the next file from a shuffled list (wraps forever) → apply it.
 - **Images and videos:** each monitor has **one long-lived mpvpaper** (loop, no audio, auto-pause when hidden). The worker swaps the file through mpv's IPC socket (`$XDG_RUNTIME_DIR/wallweave/mpv-<monitor>.sock`, `loadfile`) instead of restarting it. mpvpaper is only started at boot or after a crash.
   - Why: starting/killing a wallpaper process (or changing a hyprpaper wallpaper) destroys and recreates a layer surface, and Hyprland then sends pointer events to the window under the cursor — a fullscreen video on *any* monitor would show its hidden cursor and player controls on every rotation. Swapping the file keeps the same surface.
@@ -189,33 +177,31 @@ SQLite file `wallweave.db` (created next to the plugin root; ignored by git):
 | `libraries` | One row per wallpaper folder: path, thumbnail list (JSON), image/video counts |
 | `status` | Single row with the last health probe (mpvpaper installed, label, color) |
 
-The schema lives in `db/schema.sql` and is applied automatically on every start (`CREATE TABLE IF NOT EXISTS`).
+The schema lives in `backend/schema.sql` and is applied automatically on every start (`CREATE TABLE IF NOT EXISTS`).
 
 ## Project layout
 
 ```
 wallweave/
 ├── manifest.json          Omarchy plugin manifest (id: audryus.wallweave, bar-widget)
-├── main.go                Process entry: DB open, workers start, stdin/stdout loop
-├── go.mod / go.sum        Go module (github.com/audryus/wallweave)
-├── Makefile               build / preview / validate / rescan helpers
+├── Makefile               test / preview / validate / rescan helpers
 ├── assets/                README screenshots
-├── db/
-│   ├── db.go              Open SQLite, WAL mode, run migration
-│   └── schema.sql         Table definitions
-├── command/
-│   ├── command.go         Commander, Request/Response types, registry
-│   ├── status.go          get_status: probe tools, save/load health
-│   ├── library.go         add/del/browse libraries, ffmpeg thumbnails
-│   ├── display.go         browse/edit displays, hyprctl monitor detection
-│   ├── display_worker.go  Rotation loop, omarchy default/fallback
-│   ├── mpv.go             Long-lived mpvpaper per monitor, IPC file swaps
-│   ├── worker_lock.go     flock master election + Unix-socket wake
-│   └── *_test.go          Unit tests
+├── backend/               Python backend (standard library only)
+│   ├── __main__.py        Process entry: DB open, workers start, stdin/stdout loop
+│   ├── db.py              Open SQLite, WAL mode, run migration
+│   ├── schema.sql         Table definitions
+│   ├── commander.py       Commander, Request/Response types, registry
+│   ├── status.py          get_status: probe tools, save/load health
+│   ├── library.py         add/del/browse libraries, ffmpeg thumbnails
+│   ├── display.py         browse/edit displays, hyprctl monitor detection
+│   ├── worker.py          Rotation loop, omarchy default/fallback
+│   ├── mpv.py             Long-lived mpvpaper per monitor, IPC file swaps
+│   └── worker_lock.py     flock master election + Unix-socket wake
+├── tests/                 Unit tests (unittest)
 └── ui/
     ├── shell.qml          Plugin entry (BarWidget + PopupCard)  ← from manifest
     ├── Main.qml           Full popup content (used by shell + preview)
-    ├── Backend.qml        Spawns `bin/wallweave` (fallback: `go run .`), JSON-lines bridge
+    ├── Backend.qml        Spawns `python3 -u -m backend`, JSON-lines bridge
     ├── Status.qml         Header health badge
     ├── Menu.qml           Left navigation
     ├── Library.qml        Libraries panel
@@ -238,8 +224,8 @@ The popup UI follows your **OS language** (via `Qt.locale().uiLanguages`), with 
 How it works:
 
 - All human-facing QML strings go through `I18n.tr("some.key")` / `I18n.trCount(...)`.
-- The Go backend never sends English sentences for the badge or known errors — it sends stable codes (`running`, `degraded`, `omarchy_fallback`, `folder_exists`, …) that the UI translates.
-- Technical Go errors (`err.Error()`, worker logs) stay untranslated and only appear in the console.
+- The backend never sends English sentences for the badge or known errors — it sends stable codes (`running`, `degraded`, `omarchy_fallback`, `folder_exists`, …) that the UI translates.
+- Technical backend errors (exception messages, worker logs) stay untranslated and only appear in the console.
 - The product name **Wall Weave** is intentionally not translated.
 
 ### Adding a language
@@ -253,25 +239,24 @@ How it works:
 ## Development
 
 ```bash
-make build      # go build -o bin/wallweave .
-make run        # build + open the isolated preview window (qs -p ui/_preview.qml)
+make test       # python3 -m unittest discover -s tests -t .
+make run        # open the isolated preview window (qs -p ui/_preview.qml)
 make run-pt     # same, forcing Portuguese (WALLWEAVE_LANG=pt)
 make run-zh     # same, forcing Chinese (WALLWEAVE_LANG=zh)
-make debug      # same, but without optimizations
 make validate   # omarchy plugin validate .
 make rescan     # omarchy-shell shell rescanPlugins
 make restart    # omarchy restart shell
 ```
 
 - **Preview without the bar:** `make run` opens `ui/_preview.qml` in its own window. Press **F5** to reload.
-- **Live reload inside Omarchy:** saving any file under the installed plugin folder (`~/.config/omarchy/plugins/audryus.wallweave/`) reloads the QML automatically. The Go side restarts whenever the popup opens (it is started by `Backend.qml` via `bin/wallweave`, falling back to `go run .`).
+- **Live reload inside Omarchy:** saving any file under the installed plugin folder (`~/.config/omarchy/plugins/audryus.wallweave/`) reloads the QML automatically. The Python side restarts whenever the popup opens (it is started by `Backend.qml` via `python3 -u -m backend`).
 - **Keep the popup open while developing:** run with `WALLWEAVE_DEV=1` in the environment.
 - **Force a language:** set `WALLWEAVE_LANG=pt` (or `zh`) in the environment; otherwise the OS locale decides.
 
 ### Tests
 
 ```bash
-go test ./...
+make test
 ```
 
 ## Optional tools cheat-sheet
