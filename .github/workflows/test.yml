@@ -1,0 +1,13 @@
+# Runs the Python backend unit tests (standard library only, nothing to
+# install). Tests that need real system tools (hyprctl) skip themselves.
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: make test
