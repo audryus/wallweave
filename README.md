@@ -158,9 +158,11 @@ Known errors carry a stable `code` (e.g. `folder_exists`) that the UI translates
 - **Back to "Omarchy global":** sets the theme's default background and stops that monitor's mpvpaper.
 - **Changing library or deleting one** wakes the workers immediately so they do not wait for the timer.
 
-### Multi-monitor = multiple processes
+### Multi-monitor = one backend
 
-With two monitors, the Omarchy bar loads the widget twice → **two wallweave processes**. Only one of them may run the wallpaper workers:
+With two monitors, the Omarchy bar loads the widget twice. The backend is **not** owned by the widget: the plugin also declares a `service` entry point (`ui/Service.qml`), which omarchy-shell mounts **once** per shell. Every widget instance looks it up with `bar.shell.serviceFor("audryus.wallweave")`, so all monitors share a single `python3 -m backend` process. The standalone preview (`make run`) has no shell, so it starts its own backend.
+
+A second backend can still appear (the preview running next to the shell, or an older shell without services), so the workers keep a master election:
 
 1. Each process tries to take an exclusive `flock` on `wallweave.workers.lock`.
 2. The winner becomes the **master**: it starts the workers and listens on an abstract Unix socket (`@wallweave.wake`).
@@ -200,6 +202,7 @@ wallweave/
 ├── tests/                 Unit tests (unittest)
 └── ui/
     ├── shell.qml          Plugin entry (BarWidget + PopupCard)  ← from manifest
+    ├── Service.qml        Plugin service: the one shared Backend  ← from manifest
     ├── Main.qml           Full popup content (used by shell + preview)
     ├── Backend.qml        Spawns `python3 -u -m backend`, JSON-lines bridge
     ├── Status.qml         Header health badge

@@ -25,6 +25,8 @@ Item {
     // Single place that sends the status request: covers late injection
     // (Main creates the backend after this component) and normal creation.
     Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "get_status"}))
+    // The shared backend (plugin service) may arrive after this component.
+    onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "get_status"}))
 
     // Update the badge whenever the backend emits statusReceived.
     Connections {

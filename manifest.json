@@ -6,10 +6,12 @@
   "author": "audryus",
   "description": "A simple overlay for creating weaves",
   "kinds": [
-    "bar-widget"
+    "bar-widget",
+    "service"
   ],
   "entryPoints": {
-    "barWidget": "ui/shell.qml"
+    "barWidget": "ui/shell.qml",
+    "service": "ui/Service.qml"
   },
   "barWidget": {
     "displayName": "Wall Weave",

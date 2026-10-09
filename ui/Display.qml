@@ -23,6 +23,8 @@ Column {
 
     // Ask for the display list as soon as the component is completed.
     Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "browse_displays"}))
+    // The shared backend (plugin service) may arrive after this component.
+    onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "browse_displays"}))
 
     // ----- Properties injected by the parent (Main.qml) -----
     property var backend: null

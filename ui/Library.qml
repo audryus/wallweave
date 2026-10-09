@@ -20,6 +20,8 @@ Column {
     // Ask for the library list as soon as the backend is available
     // (covers both injection orders: backend before or after onCompleted).
     Component.onCompleted: if (backend) Qt.callLater(() => backend.send({cmd: "browse_libraries"}))
+    // The shared backend (plugin service) may arrive after this component.
+    onBackendChanged: if (backend) Qt.callLater(() => backend.send({cmd: "browse_libraries"}))
 
     // ----- Properties injected by the parent (Main.qml) -----
     property var backend: null

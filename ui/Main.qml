@@ -20,8 +20,50 @@ Column {
     readonly property color background: bar ? bar.background : Color.background
     readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
-    // Non-visual backend — a QtObject, so it does not take layout space.
-    Backend { id: backend }
+    // The backend this popup talks to. Inside omarchy it is the plugin's
+    // service (ui/Service.qml), mounted once per shell, so the widgets of
+    // every monitor share ONE backend process. The standalone preview has
+    // no shell, so it starts its own.
+    property var backend: null
+    readonly property string pluginId: "audryus.wallweave"
+    // How many times the service lookup ran (it may load after the widget).
+    property int serviceTries: 0
+
+    Component {
+        id: localBackendComponent
+        Backend { }
+    }
+
+    // resolveBackend picks the shared service when hosted; otherwise (or
+    // when the service never shows up, e.g. an older shell) a local one.
+    // The bar host injects `bar` only after the widget is created, so
+    // nothing is decided until it arrives (onBarChanged calls this again).
+    function resolveBackend() {
+        if (backend || !bar) return
+        // Computed here, not as a binding: onBarChanged runs before a
+        // binding on `bar` is re-evaluated, so it would read a stale value.
+        const hosted = !!(bar.shell && typeof bar.shell.serviceFor === "function")
+        if (hosted) {
+            backend = bar.shell.serviceFor(pluginId)
+            if (backend) return
+            serviceTries++
+            if (serviceTries < 10) return  // serviceLookup retries
+            console.warn("[wallweave] service not available, starting a local backend")
+        }
+        backend = localBackendComponent.createObject(root)
+    }
+
+    // Retries the service lookup every 500 ms (max ~5 s).
+    Timer {
+        id: serviceLookup
+        interval: 500
+        repeat: true
+        running: !root.backend && root.serviceTries > 0
+        onTriggered: root.resolveBackend()
+    }
+
+    Component.onCompleted: resolveBackend()
+    onBarChanged: resolveBackend()
 
     // Width comes from the parent (PopupCard) or the FloatingWindow preview.
     width: parent ? parent.width : 680
@@ -50,7 +92,7 @@ Column {
         // Status badge (dot + label) that queries the backend for health.
         Status {
             id: statusItem
-            backend: backend
+            backend: root.backend
             anchors.verticalCenter: parent.verticalCenter
         }
     }
@@ -183,7 +225,7 @@ Column {
           // Libraries panel — visible when menu index is 0.
           Library {
             id: libraryCol
-            backend: backend
+            backend: root.backend
             bar: root.bar
             active: menu.selected === 0
           }
@@ -192,7 +234,7 @@ Column {
           // It receives the library list and the health status from here.
           Display {
             id: displayCol
-            backend: backend
+            backend: root.backend
             bar: root.bar
             active: menu.selected === 1
             libraries: libraryCol.libraries
