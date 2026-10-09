@@ -114,7 +114,7 @@ Column {
             else { console.log("displays unexpected payload", JSON.stringify(data)); return }
             root.ensureState()
         }
-        // An error came from Go — log it (code is available for i18n later).
+        // An error came from the backend — log it (code is available for i18n later).
         function onErrorReceived(msg, code) { console.warn("Display backend error:", code || "", msg) }
     }
 

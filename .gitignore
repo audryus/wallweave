@@ -2,3 +2,4 @@ bkp
 *.lock
 *.db*
 bin/
+__pycache__/

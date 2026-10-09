@@ -47,7 +47,7 @@ Column {
     }
 
     // Folder picker: opens zenity's directory chooser; when the user picks
-    // a folder, the path is sent to Go as an "add_library" command.
+    // a folder, the path is sent to the backend as an "add_library" command.
     Process {
         id: folderPickerProc
         command: ["zenity", "--file-selection", "--directory", "--title=" + I18n.tr("library.picker_title")]
@@ -67,7 +67,7 @@ Column {
         function onStarted() { backend.send({cmd: "browse_libraries"}) }
         // Full list arrived (after browse_libraries).
         function onLibrariesReceived(data) {
-            // Go sends {type:"browse_libraries", message:"[...]"} — Backend
+            // The backend sends {type:"browse_libraries", message:"[...]"} — Backend
             // already ran JSON.parse on the message.
             if (Array.isArray(data)) root.libraries = data
             else if (data && Array.isArray(data.libraries)) root.libraries = data.libraries
@@ -77,7 +77,7 @@ Column {
         function onLibraryReceived(data) {
             backend.send({cmd: "browse_libraries"})
         }
-        // An error came from Go — log it (code is available for i18n later).
+        // An error came from the backend — log it (code is available for i18n later).
         function onErrorReceived(msg, code) { console.warn("Library backend error:", code || "", msg) }
     }
 

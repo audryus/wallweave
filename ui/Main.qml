@@ -123,7 +123,7 @@ Column {
                 font.italic: true
             }
             // Extra hint when mpvpaper is missing: images fall back to
-            // Omarchy's global background. Go sends the "omarchy_fallback"
+            // Omarchy's global background. The backend sends the "omarchy_fallback"
             // code, which I18n turns into a sentence.
             Text {
                 visible: !statusItem.widgetStatus.mpvpaper
@@ -137,7 +137,7 @@ Column {
             }
             // Happy path: mpvpaper installed and running.
             Text {
-                // Go sends color "#2ecc71" + label "running" when all is well.
+                // The backend sends color "#2ecc71" + label "running" when all is well.
                 visible: statusItem.widgetStatus.color === "#2ecc71"
                 text: I18n.tr("status.all_ok")
                 color: "#2ecc71"

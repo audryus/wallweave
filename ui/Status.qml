@@ -2,7 +2,7 @@
 // Small status badge shown in the header: a colored dot plus a label
 // (Running / Degraded / Loading...). It asks the backend for the health
 // status and exposes hover state so Main can keep a details card open.
-// The badge text is translated: Go sends a stable code (running/degraded),
+// The badge text is translated: the backend sends a stable code (running/degraded),
 // which I18n maps to the current language.
 import QtQuick
 import qs.Commons
@@ -18,7 +18,7 @@ Item {
     // Injected by the parent (Main.qml / shell.qml). E.g.: Status { backend: backend }
     property var backend: null
 
-    // Initial state until the first response arrives from Go. label is
+    // Initial state until the first response arrives from the backend. label is
     // empty on purpose — the badge shows the translated "Loading..." then.
     property var widgetStatus: ({ color: '#ff0000', label: "", mpvpaper: false, connected: false })
 

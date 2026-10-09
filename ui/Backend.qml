@@ -1,6 +1,6 @@
 // Backend.qml
-// Non-visual bridge between the QML UI and the Go backend process.
-// It starts "go run ." as a child process, writes one JSON command per
+// Non-visual bridge between the QML UI and the Python backend process.
+// It starts "python3 -m backend" as a child process, writes one JSON command per
 // line to its stdin, reads one JSON response per line from its stdout,
 // and emits typed signals (statusReceived, librariesReceived, ...) that
 // the other components listen to.
@@ -10,15 +10,15 @@ import Quickshell.Io
 QtObject {
     id: backend
 
-    // --- Signals emitted when a response arrives from Go ---
+    // --- Signals emitted when a response arrives from the backend ---
     signal statusReceived(var status)          // health status (get_status)
     signal librariesReceived(var libraries)    // full library list
     signal libraryReceived(var library)        // one library was added
-    // An error from Go: code is a stable i18n key (e.g. "folder_exists")
+    // An error from the backend: code is a stable i18n key (e.g. "folder_exists")
     // when present; message is the technical text for the console.
     signal errorReceived(string message, string code)
     signal displaysReceived(var displays)      // display/monitor list
-    // The Go process (re)started — panels re-send their initial requests,
+    // The backend process (re)started — panels re-send their initial requests,
     // since anything sent while it was down was dropped.
     signal started()
 
@@ -40,26 +40,22 @@ QtObject {
         return i > 0 ? s.slice(0, i) : s
     }
 
-    // Prefer the prebuilt binary (make build → bin/wallweave) so the UI
-    // does not need Go on qs's PATH; fall back to `go run .` otherwise.
-    readonly property string backendCommand:
-        "if [ -x ./bin/wallweave ]; then exec ./bin/wallweave; " +
-        "else exec go run .; fi"
-
-    // The Go child process. It runs continuously while the UI is open.
+    // The backend child process. It runs continuously while the UI is open.
+    // -u: unbuffered stdout, so each response line reaches the UI at once.
     property var proc: Process {
         id: proc
-        command: ["/bin/sh", "-c", backend.backendCommand]
-        // Run from the plugin root so the database is created next to main.go.
+        command: ["python3", "-u", "-m", "backend"]
+        // Run from the plugin root: python finds the backend/ package there
+        // and the database is created next to it.
         workingDirectory: backend.pluginRoot
         running: true
         stdinEnabled: true
 
-        // One line of stdout = one complete JSON response from Go.
+        // One line of stdout = one complete JSON response from the backend.
         stdout: SplitParser {
             onRead: data => backend.handleLine(data)
         }
-        // Forward Go's stderr (logs/diagnostics) to the console.
+        // Forward the backend's stderr (logs/diagnostics) to the console.
         stderr: SplitParser {
             onRead: data => console.warn("[wallweave]", data)
         }
@@ -125,7 +121,7 @@ QtObject {
         }
     }
 
-    // send writes one JSON command to the Go process (one line = one
+    // send writes one JSON command to the backend process (one line = one
     // command). It does nothing when the process is not running.
     function send(obj) {
         if (!proc.running) {
