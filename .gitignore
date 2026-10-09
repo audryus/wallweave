@@ -2,3 +2,6 @@ bkp
 *.lock
 *.db*
 __pycache__/
+ui/Commons
+ui/Ui
+ui/qs/
